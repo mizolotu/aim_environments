@@ -1,4 +1,7 @@
 {
+
+  "engine": "sensors",
+
   "nets": [
     {
       "name": "ids",
