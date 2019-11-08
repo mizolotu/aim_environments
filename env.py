@@ -1,8 +1,11 @@
-import json, gym, gym_sensors, random, sys, logging
+import json, random, sys, logging
+
 from flask import Flask, jsonify, request
 from threading import Thread
 from time import sleep, time
 from itertools import cycle
+
+from aim_environments import sensors
 
 # Flask app and logging
 
@@ -178,9 +181,9 @@ def test_env(attacks, episode_duration, start_time, policy=None, attack=None):
         env.reset()
 
 if __name__ == '__main__':
-    scenario_path = 'scenarios/sensors.json'
+    scenario_path = 'aim_environments/scenarios/sensors.json'
     scenario = load_scenario(scenario_path)
-    env = gym.make('sensors-v0')
+    env = sensors.SensorsEnv()
     env.create_scenario(scenario)
     env.start_scenario()
     attacks = [

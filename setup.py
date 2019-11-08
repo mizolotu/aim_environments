@@ -1,10 +1,11 @@
-from setuptools import setup
+from setuptools import setup, find_packages
 
 with open("README.md", "r") as fh:
     long_description = fh.read()
 
 setup(
     name="aim-environments",
+    packages=[package for package in find_packages() if package.startswith('aim_environments')],
     version="0.0.1",
     author="Mikhail Zolotukhin",
     author_email="mizolotu@jyu.fi",

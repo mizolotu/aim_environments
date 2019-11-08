@@ -8,11 +8,11 @@ from random import shuffle
 from threading import Thread, Timer
 from time import time, sleep
 
-from environments.common.odl_utils import *
-from environments.common.ovs_utils import *
-from environments.common.net_utils import *
-from environments.common.dir_utils import *
-from environments.common.flow_mon import FlowMonitor
+from aim_environments.common.odl_utils import *
+from aim_environments.common.ovs_utils import *
+from aim_environments.common.net_utils import *
+from aim_environments.common.dir_utils import *
+from aim_environments.common.flow_mon import FlowMonitor
 
 class SensorsEnv:
 
