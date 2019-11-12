@@ -193,6 +193,8 @@ if __name__ == '__main__':
         'exploit_attack',
         'slowloris_attack'
     ]
+    if 'debug' in sys.argv:
+        env.debug = True
     if len(sys.argv) > 1 and sys.argv[1] == 'test':
         test = Thread(target=test_env, args=(attacks, 30, 5, *sys.argv[2:]))
         test.setDaemon(True)

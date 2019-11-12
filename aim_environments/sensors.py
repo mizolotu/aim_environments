@@ -865,11 +865,9 @@ class SensorsEnv:
                     tmp_path = '{0}/tmp'.format(container['volume'])
                     os.chmod(tmp_path, 0o777)
 
-        # define network graph and start updating its values
+        # list of attack containers
 
         self.attack_containers = []
-        self.define_network_graph()
-        self.monitor_network_graph()
 
         # define dns subnets and subnets that require to be resolved
 
@@ -903,15 +901,15 @@ class SensorsEnv:
                 if action_type == 1:
                     action(pattern, action_type)
                     self.action_logs[pattern_idx, idx] = action_type
-            if self.debug:
-                device_ip = '.'.join(pattern.split('.')[1:5])
-                if (pattern in self.attack_flows['a']) or (pattern in self.attack_flows['b'] and device_ip in self.infected):
-                    if idx >= 0:
-                        if action_type == 1:
-                            direction = 'IN'
-                        else:
-                            direction = 'OUT'
-                    print('{0}, {1}: {2}'.format(pattern, action.__name__, direction)) 
+                if self.debug:
+                    device_ip = '.'.join(pattern.split('.')[1:5])
+                    if (pattern in self.attack_flows['a']) or (pattern in self.attack_flows['b'] and device_ip in self.infected):
+                        if idx >= 0:
+                            if action_type == 1:
+                                direction = 'IN'
+                            else:
+                                direction = 'OUT'
+                        print('{0}, {1}: {2}'.format(pattern, action.__name__, direction))
 
     def update_state(self, packets, q_size):
         while True:
@@ -930,14 +928,23 @@ class SensorsEnv:
                         self.vnf_logs = np.vstack([self.vnf_logs, np.zeros((1, self.n_vnf_features))])
                         self.sum_vnf_logs = np.vstack([self.sum_vnf_logs, np.zeros((1, self.n_vnf_features))])
                         self.action_logs = np.vstack([self.action_logs, np.zeros((1, self.n_action_categories))])
+
+                # find all unique flows registered by the system
+
                 current_flows = []
                 for frame in self.frames:
                     for f in frame[1]:
                         if f not in current_flows:
                             current_flows.append(f)
+                    for pattern in self.patterns:
+                        if pattern not in current_flows:
+                            current_flows.append(pattern)
                 if self.debug:
                     print('Number of flows = {0}'.format(len(current_flows)))
                     print('Number of packets = {0}'.format([len(x) for x in self.state_p]))
+
+                # generate state
+
                 state_size = len(current_flows)
                 state_f = []
                 state_p = []
@@ -1745,132 +1752,6 @@ class SensorsEnv:
             sleep(t_start + self.time_window - t)
         self.status = 'READY'
 
-    def define_network_graph(self, t_window = None):
-        if t_window is None:
-            t_window = int(self.time_window)
-        n_features = 4
-
-        # define network graph used to calculate score
-
-        nodes = []
-        node_types = []
-        n_rows = 3
-        n_nodes_per_row = [0 for _ in range(n_rows)]
-        for container in self.containers['app']['admin'] + self.containers['app']['device']:
-            nodes.append(container['ip'])
-            node_type = container['name'].split('_')[0]
-            node_types.append(node_type)
-            if node_type == 'admin':
-                row_i = 0
-            elif node_type == 'device':
-                row_i = 1
-            n_nodes_per_row[row_i] += 1
-        serv_row_i = 2
-        for name in self.resolv['names']:
-            nodes.append(name)
-            node_type_with_digit = name.split('.')[0]
-            node_type = ''.join([symbol for symbol in node_type_with_digit if symbol.isdigit()==False])
-            node_types.append(node_type)
-            n_nodes_per_row[serv_row_i] += 1
-        for dns_ip in self.containers['app']['device'][0]['dns']:
-            nodes.append(dns_ip)
-            node_types.append('dns')
-            n_nodes_per_row[serv_row_i] += 1
-        node_positions = []
-        for i in range(len(n_nodes_per_row)):
-            row_y = float(i)/(len(n_nodes_per_row) - 1)
-            for j in range(n_nodes_per_row[i]):
-                node_x = float(j)/(n_nodes_per_row[i] - 1)
-                node_positions.append([node_x, row_y])
-        n_nodes = len(nodes)
-        src_node_values = deque(maxlen=t_window)
-        dst_node_values = deque(maxlen=t_window)
-        for _ in range(t_window):
-            src_node_values.append(np.zeros((n_nodes, n_features)))
-            dst_node_values.append(np.zeros((n_nodes, n_features)))
-        edges = []
-        for src_container in self.containers['app']['admin']:
-            for dst_container in self.containers['app']['device']:
-                edges.append((src_container['ip'], dst_container['ip']))
-        for src_container in self.containers['app']['device']:
-            for name in self.resolv['names']:
-                edges.append((src_container['ip'], name))
-            for dns_ip in self.containers['app']['device'][0]['dns']:
-                edges.append((src_container['ip'], dns_ip))
-        n_edges = len(edges)
-        edge_values = deque(maxlen=t_window)
-        reward_flows = deque(maxlen=t_window)
-        flow_values = deque(maxlen=t_window)
-        n_flows = len(self.current_flows)
-        n_w = 4
-        for _ in range(t_window):
-            edge_values.append(np.zeros((n_edges, n_features)))
-            reward_flows.append(np.zeros(n_flows))
-            flow_values.append(np.zeros((n_flows, n_w)))
-        self.network_graph = {
-            'nodes': nodes,
-            'src_node_values': src_node_values,
-            'dst_node_values': dst_node_values,
-            'flow_values': flow_values,
-            'reward_flows': reward_flows,
-            'edges': edges,
-            'edge_values': edge_values,
-            'frame_status': deque([0 for _ in range(t_window)], maxlen=t_window)
-        }
-
-        # extend the graph for vizualization purposes
-
-        vnfs = []
-        vnf_src_dst = []
-        ips = self.resolv['ips']
-        n_actions = len(self.action_logs)
-        for i in range(len(self.action_categories)):
-            for j in range(n_actions):
-                if self.action_logs[j, i] > 0:
-                    proto, src, dst_ip = src_dst_ips(self.patterns[j])
-                    if dst_ip in ips:
-                        dst = self.resolv['names'][ips.index(dst_ip)]
-                    else:
-                        dst = dst_ip
-                    src_position = node_positions[nodes.index(src), :]
-                    dst_position = node_positions[nodes.index(dst), :]
-                    src_dst = [src_position.tolist(), dst_position.tolist()]
-                    if src_dst not in vnf_src_dst:
-                        vnf_src_dst.append(src_dst)
-                        vnfs.append([self.action_categories[i]])
-                    else:
-                        idx = vnf_src_dst.index(src_dst)
-                        vnfs[idx].append(self.action_categories[i])
-        src_node_deltas = (src_node_values[-1] - src_node_values[0])
-        dst_node_deltas = (dst_node_values[-1] - dst_node_values[0])
-        edge_deltas = edge_values[-1] - edge_values[0]
-        self.log['graph'] = {
-            'nodes': nodes,
-            'node_types': node_types,
-            'node_positions': node_positions,
-            'src_node_deltas': src_node_deltas.tolist(),
-            'dst_node_deltas': dst_node_deltas.tolist(),
-            'edges': edges,
-            'edge_deltas': edge_deltas.tolist(),
-            'vnfs': vnfs,
-            'vnf_src_dst_positions': vnf_src_dst,
-        }
-
-    def find_delta_windows(self):
-        t_start = self.network_graph['frame_status'].index(0)
-        t_end = int(self.time_window) - 1 - list(self.network_graph['frame_status'])[::-1].index(0)
-        return t_start, t_end
-
-    def monitor_network_graph(self):
-        sensor_activity_fpath = 'log/sensor_activity'
-        malware_activity_fpath = 'tmp/malware_activity'
-        th = Thread(target=self.update_network_graph, args=(sensor_activity_fpath, malware_activity_fpath, self.update_interval))
-        th.setDaemon(True)
-        th.start()
-        th = Thread(target=self.check_for_malware)
-        th.setDaemon(True)
-        th.start()
-
     def check_for_malware(self, malware_activity_fpath = 'tmp/malware_activity'):
         while True:
             t_start = time()
@@ -1887,174 +1768,11 @@ class SensorsEnv:
             if t < t_start + self.update_interval:
                 sleep(self.update_interval + t_start - t)
 
-    def update_network_graph(self, sensor_activity_fpath, malware_activity_fpath, interval=1, key='sensors'):
-        while True:
-            t_start = time()
-
-            # update network graph used to calculate score
-
-            app_edge_values, app_flows, app_flow_values = self.update_edges(
-                self.containers['app']['admin'] + self.containers['app']['device'], sensor_activity_fpath, key=key
-            )
-            attacker_edge_values, attacker_flows, attacker_flow_values = self.update_edges(
-                [container for container,cmd in self.attack_containers], malware_activity_fpath, key=key
-            )
-            edge_values = np.hstack([app_edge_values, attacker_edge_values])
-            src_node_values = np.zeros_like(self.network_graph['src_node_values'][0])
-            dst_node_values = np.zeros_like(self.network_graph['dst_node_values'][0])
-            for i,edge in enumerate(self.network_graph['edges']):
-                src, dst = edge
-                src_node_values[self.network_graph['nodes'].index(src), :] += edge_values[i, :]
-                dst_node_values[self.network_graph['nodes'].index(dst), :] += edge_values[i, :]
-            self.network_graph['src_node_values'].append(src_node_values)
-            self.network_graph['dst_node_values'].append(dst_node_values)
-            self.network_graph['edge_values'].append(edge_values)
-            n_windows = len(self.network_graph['edge_values'])
-            current_flows = self.current_flows
-            n_flows = len(current_flows)
-            n_counts = 4
-            flows = [app_flows, attacker_flows]
-            flow_values = [app_flow_values, attacker_flow_values]
-            reward_frame = np.zeros((n_flows, n_counts))
-            for j in range(2):
-                for flow, flow_feature_vector in zip(flows[j], flow_values[j]):
-                    idx = flow_follows_pattern(flow, current_flows)
-                    reward_frame[idx, j*2:j*2+2] = flow_feature_vector
-            self.network_graph['flow_values'].append(reward_frame)
-            self.network_graph['reward_flows'].append(current_flows)
-
-            # update frame status
-
-            index_to_look = [0,1] # we restart attack so those indexes should not be a problem
-            if np.any(self.network_graph['src_node_values'][-2][:, index_to_look] > self.network_graph['src_node_values'][-1][:, index_to_look]):
-                self.network_graph['frame_status'].append(1)
-            else:
-                self.network_graph['frame_status'].append(0)
-
-            # calculate score based on the network graph
-
-            self.update_graph_reward()
-
-            # update log graph used for vizualization
-
-            nodes = self.log['graph']['nodes']
-            node_positions = np.array(self.log['graph']['node_positions'])
-            vnfs = []
-            vnf_src_dst = []
-            ips = self.resolv['ips']
-            n_actions = len(self.action_logs)
-            for i in range(len(self.action_categories)):
-                for j in range(n_actions):
-                    if self.action_logs[j, i] > 0:
-                        proto, src, dst_ip = src_dst_ips(self.patterns[j])
-                        if dst_ip in ips:
-                            dst = self.resolv['names'][ips.index(dst_ip)]
-                        else:
-                            dst = dst_ip
-                        src_position = node_positions[nodes.index(src), :]
-                        dst_position = node_positions[nodes.index(dst), :]
-                        src_dst = [src_position.tolist(), dst_position.tolist()]
-                        if src_dst not in vnf_src_dst:
-                            vnf_src_dst.append(src_dst)
-                            vnfs.append([self.action_categories[i]])
-                        else:
-                            idx = vnf_src_dst.index(src_dst)
-                            vnfs[idx].append(self.action_categories[i])
-            delta_start, delta_end = self.find_delta_windows()
-            src_node_deltas = (self.network_graph['src_node_values'][delta_end] - self.network_graph['src_node_values'][delta_start])
-            dst_node_deltas = (self.network_graph['dst_node_values'][delta_end] - self.network_graph['dst_node_values'][delta_start])
-            edge_deltas = self.network_graph['edge_values'][delta_end] - self.network_graph['edge_values'][delta_start]
-            self.log['graph']['src_node_deltas'] = src_node_deltas.tolist()
-            self.log['graph']['dst_node_deltas'] = dst_node_deltas.tolist()
-            self.log['graph']['edge_deltas'] = edge_deltas.tolist()
-            self.log['graph']['vnfs'] = vnfs
-            self.log['graph']['vnf_src_dst_positions'] = vnf_src_dst
-
-            t = time()
-            if t < t_start + interval:
-                sleep(interval + t_start - t)
-            else:
-                print('DELAY :/')
-
     def get_score_coeff(self, attack_name):
         return self.score_coeff[attack_name]
 
     def set_score_coeff(self, attack_name, a, b):
         self.score_coeff[attack_name] = (a, b)
-
-    def update_graph_reward(self):
-        w_len = self.time_window
-        n_len = 4
-        n_nodes = len(self.network_graph['nodes'])
-        n_src = np.zeros((n_nodes, n_len))
-        n_dst = np.zeros((n_nodes, n_len))
-        n_delta_src = np.zeros((n_nodes, n_len))
-        n_delta_dst = np.zeros((n_nodes, n_len))
-        delta_start, delta_end = self.find_delta_windows()
-        node_delta_vals_src = self.network_graph['src_node_values'][delta_end] - self.network_graph['src_node_values'][delta_start]
-        node_delta_vals_dst = self.network_graph['dst_node_values'][delta_end] - self.network_graph['dst_node_values'][delta_start]
-
-        # synchronize flows in each reward frame
-
-        reward_frames = []
-        current_flows = self.current_flows
-        n_flows = len(current_flows)
-        for t in range(len(self.network_graph['reward_flows'])):
-            reward_frame = np.zeros((n_flows, n_len))
-            for flow, value in zip(self.network_graph['reward_flows'][t], self.network_graph['flow_values'][t]):
-                if flow in current_flows:
-                    idx = flow_follows_pattern(flow, current_flows)
-                    reward_frame[idx, :] = value
-            reward_frames.append(reward_frame)
-        self.reward_flows = list(current_flows)
-
-        # calculate deltas
-
-        node_delta_vals = reward_frames[delta_end] - reward_frames[delta_start]
-        for i in range(n_nodes):
-            node_value_end_src = self.network_graph['src_node_values'][delta_end][i]
-            node_value_end_dst = self.network_graph['dst_node_values'][delta_end][i]
-            node_delta_value_src = node_delta_vals_src[i]
-            node_delta_value_dst = node_delta_vals_dst[i]
-            node_value_src = node_value_end_src + (w_len - 1 - delta_end) * node_delta_value_src / (delta_end - delta_start + 1)
-            node_value_dst = node_value_end_dst + (w_len - 1 - delta_end) * node_delta_value_dst / (delta_end - delta_start + 1)
-            n_src[i, :] = node_value_src
-            n_dst[i, :] = node_value_dst
-            n_delta_src[i, :] = node_delta_value_src
-            n_delta_dst[i, :] = node_delta_value_dst
-        n = np.zeros((n_flows, n_len))
-        n_delta = np.zeros((n_flows, n_len))
-        for i in range(n_flows):
-            node_value_end = reward_frames[delta_end][i,:]
-            node_delta_value = node_delta_vals[i,:]
-            node_value = node_value_end + (w_len - 1 - delta_end) * node_delta_value / (delta_end - delta_start + 1)
-            n[i, :] = node_value
-            n_delta[i, :] = node_delta_value
-            #print(node_value, node_delta_value)
-        self.n_connected_failed = n.tolist()
-        n_delta_per_sec_src = n_delta_src / (delta_end - delta_start + 1)
-        n_delta_per_sec_dst = n_delta_dst / (delta_end - delta_start + 1)
-        n_delta_per_sec = n_delta / (delta_end - delta_start + 1)
-        if self.debug and np.any(n_delta_per_sec_src < 0) and self.status == 'EPISODE':
-            for node,value0,value1 in zip(self.network_graph['nodes'],self.network_graph['src_node_values'][0],self.network_graph['src_node_values'][-1]):
-                print(node,value0,value1)
-            for edge,value0,value1 in zip(self.network_graph['edges'],self.network_graph['edge_values'][0],self.network_graph['edge_values'][-1]):
-                print(edge,value0,value1)
-        self.n_connected_failed_delta = n_delta_per_sec
-        #self.n_connected_failed_delta_src = n_delta_per_sec_src.tolist()
-        #self.n_connected_failed_delta_dst = n_delta_per_sec_dst.tolist()
-        #score_array_src = n_delta_per_sec_src[:,0] - self.score_a * n_delta_per_sec_src[:,1] - self.score_b * n_delta_per_sec_src[:,2] + n_delta_per_sec_src[:,3]
-        #score_array_dst = n_delta_per_sec_dst[:,0] - self.score_c * n_delta_per_sec_dst[:,1] - self.score_d * n_delta_per_sec_dst[:,2] + n_delta_per_sec_dst[:,3]
-        #self.score, self.score_can_be_trusted = self.calc_score(n_delta_per_sec_src, n_delta_per_sec_dst)
-        #self.log['score'] = self.score
-        sum_state = np.sum(self.state_f[-1],axis=0)
-        np.set_printoptions(precision=2)
-        #print('Score: {0}, queue size = {1}'.format(self.score, self.log['debug']['flow_queue_size']))
-        if self.debug:
-            print('Sum state = {0}'.format(sum_state))
-            print('Connected & failed per source:\n{0}'.format(n_delta_per_sec_src))
-            print('Connected & failed per destination:\n{0}'.format(n_delta_per_sec_dst))
-            print('Connected & failed per flow:\n{0}'.format(n_delta_per_sec))
 
     def calculate_score(self, flows=None, delay=4):
         if flows is None:
@@ -2071,60 +1789,3 @@ class SensorsEnv:
                 idx = flow_follows_pattern(flow, reward_flows)
                 avg_scores[i] = np.mean(scores[:, idx], 0)
         return avg_scores.tolist(), avg_counts.tolist()
-
-    def update_edges(self, containers, activity_fpath, key):
-        flows = list(self.current_flows)
-        n_flows = len(flows)
-        flow_values = np.zeros((n_flows, 2))
-        n_edges = len(self.network_graph['edges'])
-        edge_values = np.zeros((n_edges, 2))
-        for container in containers:
-            src_ip = container['ip']
-            dns_ips = container['dns']
-            log_file = '{0}/{1}'.format(container['volume'], activity_fpath)
-            try:
-                with open(log_file, 'r') as f:
-                    jdata = json.load(f)
-                activity = jdata[key]
-                for item in activity:
-                    dst = item['ip']
-                    if dst in self.resolv['ips']:
-                        dst_idx = self.resolv['ips'].index(dst)
-                        dst_name = self.resolv['names'][dst_idx]
-                        dst_ip = self.resolv['ips'][dst_idx]
-                    elif dst in self.resolv['names']:
-                        dst_idx = self.resolv['names'].index(dst)
-                        dst_name = self.resolv['names'][dst_idx]
-                        dst_ip = self.resolv['ips'][dst_idx]
-                    else:
-                        dst_name = dst
-                        dst_ip = dst
-                    n_connected = item['n_connected']
-                    n_failed = item['n_failed']
-                    edge = (src_ip, dst_name)
-                    if edge in self.network_graph['edges']:
-                        idx = self.network_graph['edges'].index(edge)
-                        edge_values[idx, 0] = n_connected
-                        edge_values[idx, 1] = n_failed
-                    if src_ip in self.device_ips:
-                        flows_to_find = [src_dst_pattern(6, src_ip, dst_ip)]
-                        #if dst_name != dst_ip:
-                        #     flows_to_find += [src_dst_pattern(17, src_ip, dns_ip) for dns_ip in dns_ips]
-                    elif dst_ip in self.device_ips:
-                        flows_to_find = [src_dst_pattern(6, dst_ip, src_ip)]
-                    for flow_to_find in flows_to_find:
-                        if flow_to_find in flows:
-                            idx = flows.index(flow_to_find)
-                            flow_values[idx, 0] = n_connected
-                            flow_values[idx, 1] = n_failed
-            except Exception as e:
-                if self.debug:
-                    print(e)
-                pass
-        return edge_values, flows, flow_values
-
-    def render(self):
-        pass
-
-    def close(self):
-        pass
