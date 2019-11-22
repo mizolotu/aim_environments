@@ -93,8 +93,9 @@ def get_state():
             flows = env.current_flows
             state_f = [frame.tolist() for frame in env.state_f]
             state_p = [frame.tolist() for frame in env.state_p]
+            infected = env.infected
             break
-    return jsonify(flows, state_f, state_p)
+    return jsonify(flows, state_f, state_p, infected)
 
 @app.route('/actions')
 def get_actions():

@@ -868,6 +868,9 @@ class SensorsEnv:
         # list of attack containers
 
         self.attack_containers = []
+        malware_thread = Thread(target=self.check_for_malware)
+        malware_thread.setDaemon(True)
+        malware_thread.start()
 
         # define dns subnets and subnets that require to be resolved
 
@@ -973,6 +976,7 @@ class SensorsEnv:
                             gain = 0
                         device_ip = '.'.join(flow.split('.')[1:5])
                         number_of_replies = flow_label[2]
+                        print(self.infected)
                         if flow in self.attack_flows['a']:
                             coeff = - self.score_a * (1 - gain)
                             count_frame[0] += number_of_replies
