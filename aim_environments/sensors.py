@@ -976,7 +976,8 @@ class SensorsEnv:
                             gain = 0
                         device_ip = '.'.join(flow.split('.')[1:5])
                         number_of_replies = flow_label[2]
-                        print(self.infected)
+                        if self.debug:
+                            print(self.infected)
                         if flow in self.attack_flows['a']:
                             coeff = - self.score_a * (1 - gain)
                             count_frame[0] += number_of_replies
