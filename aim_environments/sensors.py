@@ -808,7 +808,7 @@ class SensorsEnv:
         ]
         flow_monitor = FlowMonitor(flow_cbs, vnf_cbs)
         flow_monitor.start()
-        self.process_packets = flow_monitor.process_packets()
+        self.process_packets = flow_monitor.process_packets
 
         # actions
 
@@ -888,7 +888,7 @@ class SensorsEnv:
             if self.lock:
                 pass
             else:
-                self.get_packets()
+                self.process_packets()
                 flows = self.current_flows
                 state_f = self.state_f.tolist()
                 state_p = self.state_p.tolist()
@@ -922,7 +922,7 @@ class SensorsEnv:
                                 direction = 'OUT'
                         print('{0}, {1}: {2}'.format(pattern, action.__name__, direction))
 
-    def update_state(self, packets, q_size):
+    def update_state(self, packets):
         while True:
             if self.lock:
                 pass
@@ -1769,18 +1769,17 @@ class SensorsEnv:
     def set_score_coeff(self, attack_name, a, b):
         self.score_coeff[attack_name] = (a, b)
 
-    def calculate_score(self, flows=None, delay=4):
+    def calculate_score(self, flows=None):
         if flows is None:
-            flows = self.reward_flows
+            flows = self.current_flows
         n_flows = len(flows)
-        avg_scores = np.zeros(n_flows)
+        scores = np.zeros(n_flows)
         reward_flows = self.current_flows
-        counts = np.vstack(self.count_frames[-delay:])
-        scores = np.vstack(self.reward_frames[-delay:])
-        avg_counts = np.mean(counts, 0)
+        counts = np.array(self.counts)
+        rewards = np.array(self.reward)
         for i in range(n_flows):
             flow = flows[i]
             if flow in reward_flows:
                 idx = flow_follows_pattern(flow, reward_flows)
-                avg_scores[i] = np.mean(scores[:, idx], 0)
-        return avg_scores.tolist(), avg_counts.tolist()
+                scores[i] = rewards[idx]
+        return scores.tolist(), counts.tolist()
