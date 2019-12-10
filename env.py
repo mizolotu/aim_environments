@@ -86,15 +86,7 @@ def get_patterns():
 
 @app.route('/state')
 def get_state():
-    while True:
-        if env.lock:
-            pass
-        else:
-            flows = env.current_flows
-            state_f = [frame.tolist() for frame in env.state_f]
-            state_p = [frame.tolist() for frame in env.state_p]
-            infected = env.infected
-            break
+    flows, state_f, state_p, infected = env.get_state()
     return jsonify(flows, state_f, state_p, infected)
 
 @app.route('/actions')

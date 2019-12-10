@@ -11,29 +11,25 @@ from aim_environments.common.pkt_parse import EthernetFrame
 
 class FlowMonitor():
 
-    def __init__(self, flow_cbs, vnf_cbs, bridge_name='zero', time_threshold=0.1):
+    def __init__(self, flow_cbs, vnf_cbs, bridge_name='zero', time_threshold=0.1, auto_roll=False):
         self.name = bridge_name
         self.pkt_queue = Queue()
         self.flow_cbs = flow_cbs
         self.vnf_cbs = vnf_cbs
         self.threshold = time_threshold
+        self.auto_roll = auto_roll
 
     def start(self):
         self.s_time = time()
         queue_td = Thread(target=self.queue_packets)
         queue_td.setDaemon(1)
         queue_td.start()
-        roll_td = Thread(target=self.process_packets)
-        roll_td.setDaemon(1)
-        roll_td.start()
-        #vnf_td = Thread(target=self.process_vnf_signals)
-        #vnf_td.setDaemon(1)
-        #vnf_td.start()
+        if self.auto_roll:
+            roll_td = Thread(target=self.process_packets)
+            roll_td.setDaemon(1)
+            roll_td.start()
 
     def process_vnf_signals(self):
-        count = 0
-        #while True:
-            #start_time = self.s_time + count * self.threshold
         vnf_threads = []
         for item in self.vnf_cbs:
             cb = item['func']
@@ -43,9 +39,6 @@ class FlowMonitor():
             t.start()
         for t in vnf_threads:
             t.join()
-        count += 1
-            #if time() < start_time + self.threshold:
-                #sleep(self.threshold - (time() - start_time))
 
     def queue_packets(self):
         sniffer = pcap.pcap(name=self.name, timeout_ms=10)
@@ -107,8 +100,6 @@ class FlowMonitor():
             # process flow callback
 
             q_size = self.pkt_queue.qsize()
-            with self.pkt_queue.mutex:
-                self.pkt_queue.queue.clear()
             count += 1
             for item in self.flow_cbs:
                 cb = item['func']
@@ -118,3 +109,11 @@ class FlowMonitor():
             # process vnf callbacks
 
             self.process_vnf_signals()
+
+            # break if one loop flag is true
+
+            if self.auto_roll:
+                with self.pkt_queue.mutex:
+                    self.pkt_queue.queue.clear()
+            else:
+                break

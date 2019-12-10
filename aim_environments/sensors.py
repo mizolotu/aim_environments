@@ -786,7 +786,6 @@ class SensorsEnv:
 
         self.lock = False
 
-        self.state_window_size = int(self.time_window / self.update_interval)
         self.n_vnf_features = len(self.vnf_categories)
         self.n_action_categories = len(self.action_categories)
         self.state_feature_vector_size = self.n_flow_features + 2*self.n_vnf_features + self.n_action_categories
@@ -794,11 +793,8 @@ class SensorsEnv:
         self.vnf_logs = np.zeros((0, self.n_vnf_features))
         self.sum_vnf_logs = np.zeros((0, self.n_vnf_features))
         self.action_logs = np.zeros((0, self.n_action_categories))
-        self.frames = deque(maxlen=self.state_window_size)
-        for i in range(self.state_window_size):
-            self.frames.append((np.zeros((0, self.n_pkt_features)), [], np.zeros((0, self.n_flow_features)), []))
-        self.state_p = [np.zeros((0, self.n_pkt_features)) for _ in range(self.state_window_size)]
-        self.state_f = [np.zeros((0, self.state_feature_vector_size)) for _ in range(self.state_window_size)]
+        self.state_p = np.zeros((0, self.n_pkt_features))
+        self.state_f = np.zeros((0, self.state_feature_vector_size))
 
         # start monitor
 
@@ -812,6 +808,7 @@ class SensorsEnv:
         ]
         flow_monitor = FlowMonitor(flow_cbs, vnf_cbs)
         flow_monitor.start()
+        self.process_packets = flow_monitor.process_packets()
 
         # actions
 
@@ -824,8 +821,6 @@ class SensorsEnv:
             self.mirror_to_som80_action,
             self.redirect_to_honeypot_action,
             self.drop_connections_action,
-            #self.block_source_action,
-            #self.block_destination_action
         ]
 
         self.n_actions = len(self.actions)
@@ -854,8 +849,8 @@ class SensorsEnv:
         self.gamma = 1
         self.detection_bonus = 0.25
         self.n_connected_failed_delta = []
-        self.count_frames = [np.zeros(5) for _ in range(self.state_window_size)]
-        self.reward_frames = [np.zeros((0, 1)) for _ in range(self.state_window_size)]
+        self.counts = np.zeros(5)
+        self.reward = np.zeros((0, 1))
 
         # change permissions for tmp directories of containers just in case
 
@@ -887,6 +882,19 @@ class SensorsEnv:
                 self.to_be_resolved_subnets.append(subnet_ip)
 
         self.status = 'READY'
+
+    def get_state(self):
+        while True:
+            if self.lock:
+                pass
+            else:
+                self.get_packets()
+                flows = self.current_flows
+                state_f = self.state_f.tolist()
+                state_p = self.state_p.tolist()
+                infected = self.infected
+                break
+        return flows, state_f, state_p, infected
 
     def step(self, patterns, action_inds):
         for pattern,action_idx in zip(patterns, action_inds):
@@ -921,10 +929,8 @@ class SensorsEnv:
             else:
                 self.lock = True
                 t_start = time()
-                self.log['debug']['flow_queue_size'] = q_size
-                self.log['debug']['packets_dropped'] += q_size
-                packet_features, flows, flow_features, flow_labels = self.calculate_features(packets)
-                self.frames.append((packet_features, flows, flow_features, flow_labels))  # here we append a new frame and delete the oldest one
+                state_p, flows, flow_features, flow_labels = self.calculate_features(packets)
+
                 for f in flows:
                     if f not in self.patterns:
                         self.patterns.append(f)
@@ -932,79 +938,63 @@ class SensorsEnv:
                         self.sum_vnf_logs = np.vstack([self.sum_vnf_logs, np.zeros((1, self.n_vnf_features))])
                         self.action_logs = np.vstack([self.action_logs, np.zeros((1, self.n_action_categories))])
 
-                # find all unique flows registered by the system
+                # find all unique flows affected by the system
 
-                current_flows = []
-                for frame in self.frames:
-                    for f in frame[1]:
-                        if f not in current_flows:
-                            current_flows.append(f)
-                    for pattern in self.patterns:
-                        if pattern not in current_flows:
+                current_flows = flows
+                for pattern in self.patterns:
+                    if pattern not in current_flows:
+                        pattern_idx = self.patterns.index(pattern)
+                        if np.any(self.sum_vnf_logs[pattern_idx, :]) > 0:
                             current_flows.append(pattern)
                 if self.debug:
-                    print('Number of flows = {0}'.format(len(current_flows)))
-                    print('Number of packets = {0}'.format([len(x) for x in self.state_p]))
+                    print('Number of flows = {0}'.format(len(flows)))
+                    print('Number of flows affected by actions = {0}'.format(len(current_flows)))
 
                 # generate state
 
                 state_size = len(current_flows)
-                state_f = []
-                state_p = []
-                reward_frames = []
-                count_frames = []
-                for i in range(len(self.state_f)):
-                    packet_features = self.frames[i][0]
-                    flows = self.frames[i][1]
-                    flow_features = self.frames[i][2]
-                    flow_labels = self.frames[i][3]
-                    state_frame = np.zeros((state_size, self.state_feature_vector_size))
-                    reward_frame = np.zeros(state_size)
-                    count_frame = np.zeros(5)
-                    for flow, flow_feature_vector, flow_label in zip(flows, flow_features, flow_labels):
-                        idx = flow_follows_pattern(flow, current_flows)
-                        idx_ = flow_follows_pattern(flow, self.patterns)
-                        state_frame[idx, :] = np.hstack([
+                state_f = np.zeros((state_size, self.state_feature_vector_size))
+                reward = np.zeros(state_size)
+                counts = np.zeros(5)
+                for flow, flow_feature_vector, flow_label in zip(flows, flow_features, flow_labels):
+                    idx = flow_follows_pattern(flow, current_flows)
+                    idx_ = flow_follows_pattern(flow, self.patterns)
+                    state_f[idx, :] = np.hstack([
                         flow_feature_vector,
-                            self.vnf_logs[idx_, :],
-                            self.sum_vnf_logs[idx_, :],
-                            self.action_logs[idx_, :]
-                        ])
-                        if np.any(self.sum_vnf_logs[idx_, :] > 0):
-                            gain = self.detection_bonus
+                        self.vnf_logs[idx_, :],
+                        self.sum_vnf_logs[idx_, :],
+                        self.action_logs[idx_, :]
+                    ])
+                    if np.any(self.sum_vnf_logs[idx_, :] > 0):
+                        gain = self.detection_bonus
+                    else:
+                        gain = 0
+                    device_ip = '.'.join(flow.split('.')[1:5])
+                    number_of_replies = flow_label[2]
+                    if self.debug:
+                        print(self.infected)
+                    if flow in self.attack_flows['a']:
+                        coeff = - self.score_a * (1 - gain)
+                        counts[0] += number_of_replies
+                    elif flow in self.attack_flows['b'] and device_ip in self.infected:
+                        coeff = - self.score_b * (1 - gain)
+                        counts[1] += number_of_replies
+                    else:
+                        remote_subnet = '.'.join(flow.split('.')[5:8])
+                        if remote_subnet in self.dns_subnets and flow_label[0] == 2: # i.e. DNS
+                            coeff = self.gamma
+                            counts[2] += number_of_replies
+                        elif remote_subnet in self.to_be_resolved_subnets:
+                            coeff = 1
+                            counts[3] += number_of_replies
                         else:
-                            gain = 0
-                        device_ip = '.'.join(flow.split('.')[1:5])
-                        number_of_replies = flow_label[2]
-                        if self.debug:
-                            print(self.infected)
-                        if flow in self.attack_flows['a']:
-                            coeff = - self.score_a * (1 - gain)
-                            count_frame[0] += number_of_replies
-                        elif flow in self.attack_flows['b'] and device_ip in self.infected:
-                            coeff = - self.score_b * (1 - gain)
-                            count_frame[1] += number_of_replies
-                        else:
-                            remote_subnet = '.'.join(flow.split('.')[5:8])
-                            if remote_subnet in self.dns_subnets and flow_label[0] == 2: # i.e. DNS
-                                coeff = self.gamma
-                                count_frame[2] += number_of_replies
-                            elif remote_subnet in self.to_be_resolved_subnets:
-                                coeff = 1
-                                count_frame[3] += number_of_replies
-                            else:
-                                coeff = 1
-                                count_frame[4] += number_of_replies
-                        reward_frame[idx] = coeff * number_of_replies
-                    state_f.append(state_frame)
-                    state_p.append(packet_features)
-                    reward_frames.append(reward_frame)
-                    count_frames.append(count_frame)
+                            coeff = 1
+                            counts[4] += number_of_replies
+                    reward[idx] = coeff * number_of_replies
                 self.current_flows = list(current_flows)
-                self.state_p = list(state_p)
-                self.state_f = list(state_f)
-                self.reward_frames = list(reward_frames)
-                self.count_frames = list(count_frames)
+                self.state_f = np.array(state_f)
+                self.reward = np.array(reward)
+                self.counts = np.array(counts)
                 self.lock = False
                 if self.debug:
                     print('{0} seconds spent to update state'.format(time() - t_start))
