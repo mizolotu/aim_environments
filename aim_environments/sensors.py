@@ -272,7 +272,7 @@ class SensorsEnv:
         self.app_protocols.sort()
         self.app_ports.sort()
         self.n_pkt_features = 7 + len(self.app_ports) + len(self.app_protocols)
-        self.n_flow_features = 12 + len(self.app_ports) + len(self.app_protocols)
+        self.n_flow_features = 11 + len(self.app_ports) + len(self.app_protocols)
 
         # shuffle dns tables
 
@@ -833,6 +833,7 @@ class SensorsEnv:
         self.n_drop_actions = len(self.drop_actions)
         self.block_actions = [i for i in np.arange(self.n_actions) if 'block' in self.actions[i].__name__]
         self.n_block_actions = len(self.block_actions)
+        self.time_of_last_action = time()
 
         # reward
 
@@ -921,6 +922,7 @@ class SensorsEnv:
                             else:
                                 direction = 'OUT'
                         print('{0}, {1}: {2}'.format(pattern, action.__name__, direction))
+        self.time_of_last_action = time()
 
     def update_state(self, packets):
         while True:
@@ -944,7 +946,7 @@ class SensorsEnv:
                 for pattern in self.patterns:
                     if pattern not in current_flows:
                         pattern_idx = self.patterns.index(pattern)
-                        if np.any(self.sum_vnf_logs[pattern_idx, :]) > 0:
+                        if np.any(self.action_logs[pattern_idx, :]) > 0:
                             current_flows.append(pattern)
                 if self.debug:
                     print('Number of flows = {0}'.format(len(flows)))
@@ -956,6 +958,7 @@ class SensorsEnv:
                 state_f = np.zeros((state_size, self.state_feature_vector_size))
                 reward = np.zeros(state_size)
                 counts = np.zeros(5)
+                time_since_last_action = time() - self.time_of_last_action
                 for flow, flow_feature_vector, flow_label in zip(flows, flow_features, flow_labels):
                     idx = flow_follows_pattern(flow, current_flows)
                     idx_ = flow_follows_pattern(flow, self.patterns)
@@ -970,37 +973,32 @@ class SensorsEnv:
                     else:
                         gain = 0
                     device_ip = '.'.join(flow.split('.')[1:5])
-                    number_of_requests = flow_label[1]
-                    number_of_replies = flow_label[2]
-                    if number_of_requests > 0 and number_of_replies > 0:
-                        connection_is_alive = 1
-                    else:
-                        connection_is_alive = 0
+                    number_of_packets = flow_label[1] + flow_label[2]
                     if self.debug:
                         print(self.infected)
                     if flow in self.attack_flows['a']:
                         coeff = - self.score_a * (1 - gain)
-                        counts[0] += connection_is_alive
+                        counts[0] += number_of_packets
                     elif flow in self.attack_flows['b'] and device_ip in self.infected:
                         coeff = - self.score_b * (1 - gain)
-                        counts[1] += connection_is_alive
+                        counts[1] += number_of_packets
                     else:
                         remote_subnet = '.'.join(flow.split('.')[5:8])
                         if remote_subnet in self.dns_subnets and flow_label[0] == 2: # i.e. DNS
                             coeff = self.gamma
-                            counts[2] += connection_is_alive
+                            counts[2] += number_of_packets
                         elif remote_subnet in self.to_be_resolved_subnets:
                             coeff = 1
-                            counts[3] += connection_is_alive
+                            counts[3] += number_of_packets
                         else:
                             coeff = 1
-                            counts[4] += connection_is_alive
-                    reward[idx] = coeff * connection_is_alive
+                            counts[4] += number_of_packets
+                    reward[idx] = coeff * number_of_packets
 
                 self.current_flows = list(current_flows)
                 self.state_f = np.array(state_f)
                 self.reward = np.array(reward)
-                self.counts = np.array(counts)
+                self.counts = np.array(counts / (time() - self.time_of_last_action))
                 self.lock = False
                 if self.debug:
                     print('{0} seconds spent to update state'.format(time() - t_start))
@@ -1056,13 +1054,13 @@ class SensorsEnv:
                 sizes.append([])
                 flags.append([])
                 idx = len(flows) - 1
-            if packet[2] in self.app_ports:
+            if packet[2] in self.app_ports:  # src port is application port, i.e. this is a reply
                 app_port_idx = self.app_ports.index(packet[2])
                 recognized_ports[idx][app_port_idx] = 1
                 flow_labels[idx][0] = app_port_idx + 1   # reply: ssh = 1, dns = 2, http = 3
                 flow_labels[idx][2] += 1
                 ports[idx].append(packet[4])
-            if packet[4] in self.app_ports:
+            if packet[4] in self.app_ports:  # dst port is application port, i.e. this is a request
                 app_port_idx = self.app_ports.index(packet[4])
                 recognized_ports[idx][app_port_idx] = 1
                 flow_labels[idx][0] = app_port_idx + 1   # request: ssh = 1, dns = 2, http = 3
@@ -1076,21 +1074,21 @@ class SensorsEnv:
         flow_features = np.zeros((len(flows), self.n_flow_features))
         if len(flows) > 0:
             flow_features[:, 0] = [len(list(set(x))) for x in ports]  # number of unique ports, i.e. number of connections
-            flow_features[:, 1] = [np.max(x) - np.min(x) for x in timestamps]  # flow duration
-            flow_features[:, 2] = [x[1] for x in flow_labels]  # number of requests
-            flow_features[:, 3] = [x[2] for x in flow_labels]  # number of replies
-            flow_features[:, 4] = [np.min(x) for x in sizes]  # min packet size
-            flow_features[:, 5] = [np.max(x) for x in sizes]  # max packet size
-            flow_features[:, 6] = [np.mean(x) for x in sizes]  # average packet size
-            flow_features[:, 7] = [x.count(0) for x in flags]  # number of FIN flags
-            flow_features[:, 8] = [x.count(1) for x in flags]  # number of SYN flags
-            flow_features[:, 9] = [x.count(2) for x in flags]  # number of RST flags
-            flow_features[:, 10] = [x.count(3) for x in flags]  # number of PSH flags
-            flow_features[:, 11] = [x.count(4) for x in flags]  # number of ACK flags
+            #flow_features[:, 1] = [np.max(x) - np.min(x) for x in timestamps]  # flow duration
+            flow_features[:, 1] = [x[1] for x in flow_labels]  # number of requests
+            flow_features[:, 2] = [x[2] for x in flow_labels]  # number of replies
+            flow_features[:, 3] = [np.min(x) for x in sizes]  # min packet size
+            flow_features[:, 4] = [np.max(x) for x in sizes]  # max packet size
+            flow_features[:, 5] = [np.mean(x) for x in sizes]  # average packet size
+            flow_features[:, 6] = [x.count(0) for x in flags]  # number of FIN flags
+            flow_features[:, 7] = [x.count(1) for x in flags]  # number of SYN flags
+            flow_features[:, 8] = [x.count(2) for x in flags]  # number of RST flags
+            flow_features[:, 9] = [x.count(3) for x in flags]  # number of PSH flags
+            flow_features[:, 10] = [x.count(4) for x in flags]  # number of ACK flags
             for i in range(len(self.app_protocols)):
-                flow_features[:, 12 + i] = [x[i] for x in recognized_protocols] # recognized protocols
+                flow_features[:, 11 + i] = [x[i] for x in recognized_protocols] # recognized protocols
             for i in range(len(self.app_ports)):
-                flow_features[:, 12 + len(self.app_protocols) + i] = [x[i] for x in recognized_ports] # recognized ports
+                flow_features[:, 11 + len(self.app_protocols) + i] = [x[i] for x in recognized_ports] # recognized ports
         if self.log_packets:
             with open(self.pkt_log_file, 'a') as f:
                 writer = csv.writer(f)
