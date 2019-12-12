@@ -913,15 +913,11 @@ class SensorsEnv:
                 if action_type == 1:
                     action(pattern, action_type)
                     self.action_logs[pattern_idx, idx] = action_type
-                if self.debug:
-                    device_ip = '.'.join(pattern.split('.')[1:5])
-                    if (pattern in self.attack_flows['a']) or (pattern in self.attack_flows['b'] and device_ip in self.infected):
-                        if idx >= 0:
-                            if action_type == 1:
-                                direction = 'IN'
-                            else:
-                                direction = 'OUT'
-                        print('{0}, {1}: {2}'.format(pattern, action.__name__, direction))
+            if self.debug:
+                device_ip = '.'.join(pattern.split('.')[1:5])
+                if (pattern in self.attack_flows['a']) or (pattern in self.attack_flows['b'] and device_ip in self.infected):
+                    if action_idx > 0 and action_type == 1:
+                        print('Pattern: {0}, action: {1}'.format(pattern, action.__name__))
         self.time_of_last_action = time()
 
     def update_state(self, packets):
@@ -946,7 +942,7 @@ class SensorsEnv:
                 for pattern in self.patterns:
                     if pattern not in current_flows:
                         pattern_idx = self.patterns.index(pattern)
-                        if np.any(self.action_logs[pattern_idx, :]) > 0:
+                        if np.any(self.action_logs[pattern_idx, :] > 0):
                             current_flows.append(pattern)
                 if self.debug:
                     print('Number of flows = {0}'.format(len(flows)))
@@ -1461,7 +1457,7 @@ class SensorsEnv:
         i = self.action_categories.index(key)
         self.action_logs[idx, i] = value
 
-    def botnet_attack(self):
+    def botnet_attack(self, fixed_queen=False):
         self.attack_containers = []
         cc_container = self.containers['attacker']['botnet_cc'][0]
         cc_ip = cc_container['ip']
@@ -1471,7 +1467,7 @@ class SensorsEnv:
         local_path = '/home/env/Defender/iot/malware/beerai/queen.py'
         remote_path = '/tmp/queen.py'
         queen_container = random.choice(self.containers['app']['admin'])
-        if self.debug:
+        if fixed_queen:
             queen_container = self.containers['app']['admin'][0]
         queen_container_obj = self.docker_cli.containers.get(queen_container['name'])
         bee_containers = self.containers['app']['device']
