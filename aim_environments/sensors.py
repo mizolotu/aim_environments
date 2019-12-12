@@ -916,7 +916,7 @@ class SensorsEnv:
             if self.debug:
                 device_ip = '.'.join(pattern.split('.')[1:5])
                 if (pattern in self.attack_flows['a']) or (pattern in self.attack_flows['b'] and device_ip in self.infected):
-                    if action_idx > 0 and action_type == 1:
+                    if action_idx > 0:
                         print('Pattern: {0}, action: {1}'.format(pattern, action.__name__))
         self.time_of_last_action = time()
 
