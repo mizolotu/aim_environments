@@ -764,22 +764,19 @@ class SensorsEnv:
 
     def start_scenario(self):
 
-        self.infected = []
-        self.attack_flows = {'a': [], 'b': []}
+        # env info dictionary
 
-        # define env log
-
-        self.log = {
+        self.info = {
+            'episode': 0,
+            'episode_start_time': 0,
             'attack': '',
-            'graph': {},
-            'score': np.nan,
-            'debug': {
-                'episode': 0,
-                'episode_start_time': 0,
-                'flow_queue_size': 0,
-                'packets_dropped': 0,
-                'attack_flows' : []
-            }
+            'normal_flow_counts': {'dns': 0, 'device': 0, 'admin': 0},
+            'attack_flow_counts': {'target': 0, 'cc': 0},
+            'attack_flows': {
+                'target': [],
+                'cc': []
+            },
+            'infected_devices': []
         }
 
         # state
@@ -893,9 +890,9 @@ class SensorsEnv:
                 flows = self.current_flows
                 state_f = self.state_f.tolist()
                 state_p = self.state_p.tolist()
-                infected = self.infected
+                info = self.info
                 break
-        return flows, state_f, state_p, infected
+        return flows, state_f, state_p, info
 
     def step(self, patterns, action_inds):
         for pattern,action_idx in zip(patterns, action_inds):
@@ -915,7 +912,7 @@ class SensorsEnv:
                     self.action_logs[pattern_idx, idx] = action_type
             if self.debug:
                 device_ip = '.'.join(pattern.split('.')[1:5])
-                if (pattern in self.attack_flows['a']) or (pattern in self.attack_flows['b'] and device_ip in self.infected):
+                if (pattern in self.info['attack_flows']['target']) or (pattern in self.info['attack_flows']['cc'] and device_ip in self.info['infected_devices']):
                     print('Pattern: {0}, action: {1}'.format(pattern, action.__name__))
         self.time_of_last_action = time()
 
@@ -945,7 +942,7 @@ class SensorsEnv:
                 if self.debug:
                     print('Number of flows = {0}'.format(len(flows)))
                     print('Number of flows affected by actions = {0}'.format(len(current_flows)))
-                    print('Infected devices: {0}'.format(self.infected))
+                    print('Infected devices: {0}'.format(self.info['infected_devices']))
 
                 # generate state and calculate reward
 
@@ -953,6 +950,8 @@ class SensorsEnv:
                 state_f = np.zeros((state_size, self.state_feature_vector_size))
                 reward = np.zeros(state_size)
                 counts = np.zeros(5)
+                self.info['normal_flow_counts'] = {'dns': 0, 'device': 0, 'admin': 0}
+                self.info['attack_flow_counts'] = {'target': 0, 'cc': 0}
                 for flow, flow_feature_vector, flow_label in zip(flows, flow_features, flow_labels):
                     idx = flow_follows_pattern(flow, current_flows)
                     idx_ = flow_follows_pattern(flow, self.patterns)
@@ -968,14 +967,16 @@ class SensorsEnv:
                         gain = 0
                     device_ip = '.'.join(flow.split('.')[1:5])
                     number_of_packets = flow_label[1] + flow_label[2]
-                    if flow in self.attack_flows['a']:
+                    if flow in self.info['attack_flows']['target']:
                         coeff = - self.score_a * (1 - gain)
                         counts[0] += number_of_packets
+                        self.info['attack_flow_counts']['target'] += number_of_packets
                         if self.debug:
                             print('Attack flow {0}: {1} packets'.format(flow, number_of_packets))
-                    elif flow in self.attack_flows['b'] and device_ip in self.infected:
+                    elif flow in self.info['attack_flows']['cc'] and device_ip in self.info['infected_devices']:
                         coeff = - self.score_b * (1 - gain)
                         counts[1] += number_of_packets
+                        self.info['attack_flow_counts']['cc'] += number_of_packets
                         if self.debug:
                             print('Attack flow {0}: {1} packets'.format(flow, number_of_packets))
                     else:
@@ -983,14 +984,20 @@ class SensorsEnv:
                         if remote_subnet in self.dns_subnets and flow_label[0] == 2: # i.e. DNS
                             coeff = self.gamma
                             counts[2] += number_of_packets
+                            self.info['normal_flow_counts']['dns'] += number_of_packets
                         elif remote_subnet in self.to_be_resolved_subnets:
                             coeff = 1
                             counts[3] += number_of_packets
+                            self.info['normal_flow_counts']['device'] += number_of_packets
                         else:
                             coeff = 1
                             counts[4] += number_of_packets
+                            self.info['normal_flow_counts']['admin'] += number_of_packets
                     reward[idx] = coeff * number_of_packets
 
+                if self.debug:
+                    print(self.info['normal_flow_counts'])
+                    print(self.info['attack_flow_counts'])
                 self.current_flows = list(current_flows)
                 self.state_f = np.array(state_f)
                 time_since_last_action = time() - self.time_of_last_action
@@ -1463,7 +1470,7 @@ class SensorsEnv:
         i = self.action_categories.index(key)
         self.action_logs[idx, i] = value
 
-    def botnet_attack(self, fixed_queen=False):
+    def botnet_attack(self, queen_idx=None):
         self.attack_containers = []
         cc_container = self.containers['attacker']['botnet_cc'][0]
         cc_ip = cc_container['ip']
@@ -1473,8 +1480,8 @@ class SensorsEnv:
         local_path = '/home/env/Defender/iot/malware/beerai/queen.py'
         remote_path = '/tmp/queen.py'
         queen_container = random.choice(self.containers['app']['admin'])
-        if fixed_queen:
-            queen_container = self.containers['app']['admin'][0]
+        if queen_idx is not None:
+            queen_container = self.containers['app']['admin'][queen_idx]
         queen_container_obj = self.docker_cli.containers.get(queen_container['name'])
         bee_containers = self.containers['app']['device']
         bee_ips = [container['ip'] for container in bee_containers]
@@ -1483,9 +1490,10 @@ class SensorsEnv:
             for dns_ip in container['dns']:
                 if dns_ip not in dns_ips:
                     dns_ips.append(dns_ip)
-        self.attack_flows['a'] = ['.'.join(['6', ip, queen_container['ip']]) for ip in bee_ips]
-        self.attack_flows['b'] = ['.'.join(['17', ip, dns_ip]) for ip in bee_ips for dns_ip in dns_ips]
-        self.log['debug']['attack_flows'] = [(queen_container['ip'], ip) for ip in bee_ips]
+        self.info['attack_flows']['target'] = ['.'.join(['6', ip, queen_container['ip']]) for ip in bee_ips]
+        self.info['attack_flows']['cc'] = ['.'.join(['17', ip, dns_ip]) for ip in bee_ips for dns_ip in dns_ips]
+        self.info['attack_flow_counts']['target'] = 0
+        self.info['attack_flow_counts']['cc'] = 0
         random.shuffle(bee_ips)
         cmd = 'python3 {0} {1}'.format(remote_path, ','.join(bee_ips))
         queen_cmd = ' '.join(cmd.split(' ')[0:2])
@@ -1522,74 +1530,65 @@ class SensorsEnv:
             self.attack_containers.append((bee_container, bee_cmd))
             bee_container_obj = self.docker_cli.containers.get(bee_container['name'])
             self.copy_to_container(local_path, bee_container_obj, remote_path)
-            code, output = bee_container_obj.exec_run(bee_cmd, detach=True, tty=True)
+            _, _ = bee_container_obj.exec_run(bee_cmd, detach=True, tty=True)
             print(bee_container['name'], bee_container['ip'])
         return url, bees, targets
 
     def exfiltration_attack(self):
         url, bees, targets = self._attack()
-        self.log['debug']['attack_flows'] = []
         dns_ips = []
         for container in self.containers['app']['device']:
             for dns_ip in container['dns']:
                 if dns_ip not in dns_ips:
                     dns_ips.append(dns_ip)
-        for bee_ip in bees:
-            for target_ip in dns_ips:
-                self.log['debug']['attack_flows'].append((bee_ip, target_ip))
-        print(self.log['debug']['attack_flows'])
-        self.attack_flows['a'] = []
-        self.attack_flows['b'] = ['.'.join(['17', bee_ip, dns_ip]) for bee_ip in bees for dns_ip in dns_ips]
+        self.info['attack_flows']['target'] = []
+        self.info['attack_flows']['cc'] = ['.'.join(['17', bee_ip, dns_ip]) for bee_ip in bees for dns_ip in dns_ips]
+        self.info['attack_flow_counts']['target'] = 0
+        self.info['attack_flow_counts']['cc'] = 0
         jdata = {'command': 'exfiltrate'}
-        r = requests.post(url, json=jdata)
+        requests.post(url, json=jdata)
 
     def scan_attack(self):
         url, bees, targets = self._attack()
-        self.log['debug']['attack_flows'] = []
-        for bee_ip in bees:
-            for target_ip in targets:
-                self.log['debug']['attack_flows'].append((bee_ip, target_ip))
         dns_ips = []
         for container in self.containers['app']['device']:
             for dns_ip in container['dns']:
                 if dns_ip not in dns_ips:
                     dns_ips.append(dns_ip)
-        self.attack_flows['a'] = ['.'.join(['6', bee_ip, target_ip]) for bee_ip in bees for target_ip in targets]
-        self.attack_flows['b'] = ['.'.join(['17', bee_ip, dns_ip]) for bee_ip in bees for dns_ip in dns_ips]
+        self.info['attack_flows']['target'] = ['.'.join(['6', bee_ip, target_ip]) for bee_ip in bees for target_ip in targets]
+        self.info['attack_flows']['cc'] = ['.'.join(['17', bee_ip, dns_ip]) for bee_ip in bees for dns_ip in dns_ips]
+        self.info['attack_flow_counts']['target'] = 0
+        self.info['attack_flow_counts']['cc'] = 0
         jdata = {'command': 'scan_', 'target': targets}
-        r = requests.post(url, json=jdata)
+        requests.post(url, json=jdata)
 
     def exploit_attack(self):
         url, bees, targets = self._attack()
-        self.log['debug']['attack_flows'] = []
-        for bee_ip in bees:
-            for target_ip in targets:
-                self.log['debug']['attack_flows'].append((bee_ip, target_ip))
         dns_ips = []
         for container in self.containers['app']['device']:
             for dns_ip in container['dns']:
                 if dns_ip not in dns_ips:
                     dns_ips.append(dns_ip)
-        self.attack_flows['a'] = ['.'.join(['6', bee_ip, target_ip]) for bee_ip in bees for target_ip in targets]
-        self.attack_flows['b'] = ['.'.join(['17', bee_ip, dns_ip]) for bee_ip in bees for dns_ip in dns_ips]
+        self.info['attack_flows']['target'] = ['.'.join(['6', bee_ip, target_ip]) for bee_ip in bees for target_ip in targets]
+        self.info['attack_flows']['cc'] = ['.'.join(['17', bee_ip, dns_ip]) for bee_ip in bees for dns_ip in dns_ips]
+        self.info['attack_flow_counts']['target'] = 0
+        self.info['attack_flow_counts']['cc'] = 0
         jdata = {'command': 'exploit_', 'target': targets}
-        r = requests.post(url, json=jdata)
+        requests.post(url, json=jdata)
 
     def slowloris_attack(self):
         url, bees, targets = self._attack(target_prefix = 'unknown')
-        self.log['debug']['attack_flows'] = []
-        for bee_ip in bees:
-            for target_ip in targets:
-                self.log['debug']['attack_flows'].append((bee_ip, target_ip))
         dns_ips = []
         for container in self.containers['app']['device']:
             for dns_ip in container['dns']:
                 if dns_ip not in dns_ips:
                     dns_ips.append(dns_ip)
-        self.attack_flows['a'] = ['.'.join(['6', bee_ip, target_ip]) for bee_ip in bees for target_ip in targets]
-        self.attack_flows['b'] = ['.'.join(['17', bee_ip, dns_ip]) for bee_ip in bees for dns_ip in dns_ips]
+        self.info['attack_flows']['target'] = ['.'.join(['6', bee_ip, target_ip]) for bee_ip in bees for target_ip in targets]
+        self.info['attack_flows']['cc'] = ['.'.join(['17', bee_ip, dns_ip]) for bee_ip in bees for dns_ip in dns_ips]
+        self.info['attack_flow_counts']['target'] = 0
+        self.info['attack_flow_counts']['cc'] = 0
         jdata = {'command': 'slowloris_', 'target': targets}
-        r = requests.post(url, json=jdata)
+        requests.post(url, json=jdata)
 
     def start_episode(self, attack_name=None, start_time=0):
 
@@ -1641,7 +1640,7 @@ class SensorsEnv:
             print('Unknown attack vector!')
             self.score_a = 0
             self.score_b = 0
-        self.log['attack'] = attack_name
+        self.info['attack'] = attack_name
 
         # sleep to deque state frames from the previous episode
 
@@ -1649,10 +1648,10 @@ class SensorsEnv:
         if t < t_start + self.time_window:
             sleep(t_start + self.time_window - t)
 
-        self.log['debug']['episode'] += 1
-        self.log['debug']['episode_start_time'] = time()
+        self.info['episode'] += 1
+        self.info['episode_start_time'] = time()
         self.status = 'EPISODE'
-        print('\n{0}: {1}\n'.format(self.status, self.log['debug']['episode']))
+        print('\n{0}: {1}\n'.format(self.status, self.info['episode']))
 
     def reset(self):
 
@@ -1660,25 +1659,9 @@ class SensorsEnv:
         self.status = 'RESETTING'
         if self.debug:
             print('\n{0}\n'.format(self.status))
-
-        # log episode  stats
-
-        a = ''
-        if self.log['attack'] is not None:
-            a = self.log['attack']
-        af = []
-        for flows in self.log['debug']['attack_flows']:
-            af.append(flows[0] + '->' + flows[1])
-        line = ','.join([
-            str(self.log['debug']['episode']),
-            str(self.log['debug']['episode_start_time']),
-            str(t_start),
-            a,
-            ','.join(af)
-        ])
-        with open(self.gym_log_file, 'a') as f:
-            f.write(line + '\n')
-        self.attack_flows = {'a': [], 'b': []}
+        self.info['attack_flows'] = {'target': [], 'cc': []}
+        self.info['attack_flow_counts'] = {'target': 0, 'cc': 0}
+        self.info['normal_flow_counts'] = {'dns': 0, 'device': 0, 'admin': 0}
 
         # reset sdn flows tables
 
@@ -1718,8 +1701,8 @@ class SensorsEnv:
             d = '{0}/tmp'.format(container['volume'])
             clean_directory(d)
 
-        while self.infected != []:
-            self.infected = []
+        while self.info['infected_devices'] != []:
+            self.info['infected_devices'] = []
 
         # clean vnf logs
 
@@ -1764,8 +1747,8 @@ class SensorsEnv:
                     log_file = '{0}/{1}'.format(container['volume'], malware_activity_fpath)
                     try:
                         open(log_file, 'r').close()
-                        if container['ip'] not in self.infected:
-                            self.infected.append(container['ip'])
+                        if container['ip'] not in self.info['infected_devices']:
+                            self.info['infected_devices'].append(container['ip'])
                     except:
                         pass
             t = time()

@@ -23,10 +23,6 @@ def get_env_status():
 def get_n_connected_failed():
     return jsonify(env.n_connected_failed)
 
-@app.route('/packets_dropped')
-def get_n_packets_dropped():
-    return jsonify(env.log['debug']['packets_dropped'])
-
 @app.route('/mirror_all')
 def mirror_all_patterns():
     env.test_policy('mirror_all')
@@ -72,7 +68,7 @@ def start_episode():
     attack_vector = jdata['attack']
     start_time = jdata['start']
     env.start_episode(attack_vector, start_time)
-    return jsonify(env.log['debug']['episode_start_time'])
+    return jsonify(env.info['episode_start_time'])
 
 @app.route('/reset')
 def reset_env():
@@ -119,10 +115,6 @@ def take_step():
         # print(len(patterns), time() - s_time)
     return jsonify(env.action_logs.tolist())
 
-@app.route('/log')
-def get_env_log():
-    return jsonify(env.log)
-
 ### Auxiliary functions ###
 
 def load_scenario(fpath):
@@ -145,7 +137,7 @@ def warmup_env(attacks, episode_duration, start_time, n_episodes=10, attack=None
             attack_selected = None
         env.start_episode(attack_selected, start_time=start_time)
         sleep(start_time)
-        while time() - env.log['debug']['episode_start_time'] < episode_duration:
+        while time() - env.info['episode_start_time'] < episode_duration:
             sleep(1)
         env.reset()
 
@@ -165,7 +157,7 @@ def test_env(attacks, episode_duration, start_time, policy=None, attack=None):
             attack_selected = None
         env.start_episode(attack_selected, start_time)
         sleep(start_time)
-        while time() - env.log['debug']['episode_start_time'] < episode_duration:
+        while time() - env.info['episode_start_time'] < episode_duration:
             if policy is not None:
                 env.test_policy(policy)
             else:
