@@ -916,8 +916,7 @@ class SensorsEnv:
             if self.debug:
                 device_ip = '.'.join(pattern.split('.')[1:5])
                 if (pattern in self.attack_flows['a']) or (pattern in self.attack_flows['b'] and device_ip in self.infected):
-                    if action_idx > 0:
-                        print('Pattern: {0}, action: {1}'.format(pattern, action.__name__))
+                    print('Pattern: {0}, action: {1}'.format(pattern, action.__name__))
         self.time_of_last_action = time()
 
     def update_state(self, packets):
@@ -928,7 +927,6 @@ class SensorsEnv:
                 self.lock = True
                 t_start = time()
                 state_p, flows, flow_features, flow_labels = self.calculate_features(packets)
-
                 for f in flows:
                     if f not in self.patterns:
                         self.patterns.append(f)
@@ -938,7 +936,7 @@ class SensorsEnv:
 
                 # find all unique flows affected by the system
 
-                current_flows = flows
+                current_flows = flows.copy()
                 for pattern in self.patterns:
                     if pattern not in current_flows:
                         pattern_idx = self.patterns.index(pattern)
@@ -947,6 +945,7 @@ class SensorsEnv:
                 if self.debug:
                     print('Number of flows = {0}'.format(len(flows)))
                     print('Number of flows affected by actions = {0}'.format(len(current_flows)))
+                    print('Infected devices: {0}'.format(self.infected))
 
                 # generate state and calculate reward
 
@@ -954,7 +953,6 @@ class SensorsEnv:
                 state_f = np.zeros((state_size, self.state_feature_vector_size))
                 reward = np.zeros(state_size)
                 counts = np.zeros(5)
-                time_since_last_action = time() - self.time_of_last_action
                 for flow, flow_feature_vector, flow_label in zip(flows, flow_features, flow_labels):
                     idx = flow_follows_pattern(flow, current_flows)
                     idx_ = flow_follows_pattern(flow, self.patterns)
@@ -970,14 +968,16 @@ class SensorsEnv:
                         gain = 0
                     device_ip = '.'.join(flow.split('.')[1:5])
                     number_of_packets = flow_label[1] + flow_label[2]
-                    if self.debug:
-                        print(self.infected)
                     if flow in self.attack_flows['a']:
                         coeff = - self.score_a * (1 - gain)
                         counts[0] += number_of_packets
+                        if self.debug:
+                            print('Attack flow {0}: {1} packets'.format(flow, number_of_packets))
                     elif flow in self.attack_flows['b'] and device_ip in self.infected:
                         coeff = - self.score_b * (1 - gain)
                         counts[1] += number_of_packets
+                        if self.debug:
+                            print('Attack flow {0}: {1} packets'.format(flow, number_of_packets))
                     else:
                         remote_subnet = '.'.join(flow.split('.')[5:8])
                         if remote_subnet in self.dns_subnets and flow_label[0] == 2: # i.e. DNS
@@ -993,8 +993,9 @@ class SensorsEnv:
 
                 self.current_flows = list(current_flows)
                 self.state_f = np.array(state_f)
-                self.reward = np.array(reward)
-                self.counts = np.array(counts / (time() - self.time_of_last_action))
+                time_since_last_action = time() - self.time_of_last_action
+                self.reward = np.array(reward / time_since_last_action)
+                self.counts = np.array(counts / time_since_last_action)
                 self.lock = False
                 if self.debug:
                     print('{0} seconds spent to update state'.format(time() - t_start))
@@ -1180,10 +1181,15 @@ class SensorsEnv:
         current_features = np.zeros(n_patterns)
         t_now = time()
         for alert in alerts:
+            if self.debug:
+                print('Alert by {0}: {1}'.format(key, alert))
             if alert[1] in self.device_ips:
                 flow = src_dst_pattern(alert[5], alert[1], alert[3])
             elif alert[3] in self.device_ips:
                 flow = src_dst_pattern(alert[5], alert[3], alert[1])
+            else:
+                if self.debug:
+                    print('Unknown alert: {0}'.format(alert))
             idx = flow_follows_pattern(flow, self.patterns)
             if idx >= 0:
                 t_alert = float(alert[0])
