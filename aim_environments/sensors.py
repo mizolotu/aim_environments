@@ -995,12 +995,15 @@ class SensorsEnv:
                             self.info['normal_flow_counts']['admin'] += number_of_packets
                     reward[idx] = coeff * number_of_packets
 
-                if self.debug:
-                    print(self.info['normal_flow_counts'])
-                    print(self.info['attack_flow_counts'])
                 self.current_flows = list(current_flows)
                 self.state_f = np.array(state_f)
                 time_since_last_action = time() - self.time_of_last_action
+                for key_1 in ['normal_flow_counts', 'attack_flow_counts']:
+                    for key_2 in self.info[key_1].keys():
+                        self.info[key_1][key_2] = self.info[key_1][key_2] / time_since_last_action
+                if self.debug:
+                    print(self.info['normal_flow_counts'])
+                    print(self.info['attack_flow_counts'])
                 self.reward = np.array(reward / time_since_last_action)
                 self.counts = np.array(counts / time_since_last_action)
                 self.lock = False
