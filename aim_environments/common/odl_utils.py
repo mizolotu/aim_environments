@@ -158,6 +158,11 @@ class Flow():
                         last_element_found = element_found[0]
 
     @staticmethod
+    def in_port(port):
+        inp = ['in-port', port]
+        return inp
+
+    @staticmethod
     def ethernet_type(etype):
         eth_type = ['ethernet-match','ethernet-type','type', etype]
         return eth_type
@@ -176,6 +181,11 @@ class Flow():
     def ip_protocol(proto):
         ip_proto = ['ip-match', 'ip-protocol', proto]
         return ip_proto
+
+    @staticmethod
+    def ip_dscp(dscp):
+        ip_d = ['ip-match', 'ip-dscp', dscp]
+        return ip_d
 
     @staticmethod
     def go_to_table(table):
@@ -255,28 +265,9 @@ def forward_to_tunnel(cfg, pattern, iot_switch_id, table_id, priority, tunnel):
     src_mask = ip_mask(src)
     dst_mask = ip_mask(dst)
 
-    # forward outgoing packets
+    # forward packets from outside
 
-    id = 'table' + str(table_id) + '_forward_outgoing_to_tunnel_' + pattern
-    flow = Flow(iot_switch_id, table_id, id, priority, cfg.ns)
-    f_match = [
-        Flow.ethernet_type(2048),
-        Flow.ip_protocol(ip_protocol),
-        ['ipv4-source', src_mask],
-        ['ipv4-destination', dst_mask]
-    ]
-    flow.match(f_match)
-    flow.instructions([
-        ['apply-actions', [
-            {'action': [Flow.output_to_port(tunnel)], 'order': 0, 'ns': 'f'}
-        ]]
-    ], [0])
-    cfg.push_flow(flow.switch, flow.body)
-    pushed_flows.append({'node_id': iot_switch_id, 'table_id': table_id, 'flow_id': id})
-
-    # forward incoming packets
-
-    id = 'table' + str(table_id) + '_forward_incoming_to_tunnel_' + pattern
+    id = 'table' + str(table_id) + '_forward_to_tunnel_' + pattern
     flow = Flow(iot_switch_id, table_id, id, priority, cfg.ns)
     f_match = [
         Flow.ethernet_type(2048),
@@ -289,6 +280,25 @@ def forward_to_tunnel(cfg, pattern, iot_switch_id, table_id, priority, tunnel):
         ['apply-actions', [
             {'action': [Flow.output_to_port(tunnel)], 'order': 0, 'ns': 'f'}
         ]]
+    ], [0])
+    cfg.push_flow(flow.switch, flow.body)
+    pushed_flows.append({'node_id': iot_switch_id, 'table_id': table_id, 'flow_id': id})
+
+    # if there is something coming from the tunnel we let it go:
+
+    id = 'table' + str(table_id) + '_forward_from_tunnel_' + pattern
+    bigger_priority = priority + 1
+    flow = Flow(iot_switch_id, table_id, id, bigger_priority, cfg.ns)
+    f_match = [
+        Flow.in_port(tunnel),
+        Flow.ethernet_type(2048),
+        Flow.ip_protocol(ip_protocol),
+        ['ipv4-source', src_mask],
+        ['ipv4-destination', dst_mask]
+    ]
+    flow.match(f_match)
+    flow.instructions([
+        Flow.go_to_table(table_id + 1)
     ], [0])
     cfg.push_flow(flow.switch, flow.body)
     pushed_flows.append({'node_id': iot_switch_id, 'table_id': table_id, 'flow_id': id})
@@ -309,6 +319,55 @@ def unforward_from_tunnel(cfg, pattern, iot_switch_id, table_id):
         cfg.delete_flow(iot_switch_id, table_id, id)
         removed_flows.append({'node_id': iot_switch_id, 'table_id': table_id, 'flow_id': id})
     return removed_flows
+
+def forward_through_tunnel(cfg, pattern, iot_switch_id, table_id, priority, tunnel):
+
+    print(tunnel)
+    assert type(tunnel) is list
+    pushed_flows = []
+    ip_protocol, src, dst = src_dst_ips(pattern)
+    src_mask = ip_mask(src)
+    dst_mask = ip_mask(dst)
+
+    # forward packets from outside
+
+    id = 'table' + str(table_id) + '_forward_to_tunnel_' + pattern
+    flow = Flow(iot_switch_id, table_id, id, priority, cfg.ns)
+    f_match = [
+        Flow.ethernet_type(2048),
+        Flow.ip_protocol(ip_protocol),
+        ['ipv4-source', dst_mask],
+        ['ipv4-destination', src_mask]
+    ]
+    flow.match(f_match)
+    flow.instructions([
+        ['apply-actions', [
+            {'action': [Flow.output_to_port(tunnel[0])], 'order': 0, 'ns': 'f'}
+        ]]
+    ], [0])
+    cfg.push_flow(flow.switch, flow.body)
+    pushed_flows.append({'node_id': iot_switch_id, 'table_id': table_id, 'flow_id': id})
+
+    # if there is something coming from the tunnel we let it go:
+
+    id = 'table' + str(table_id) + '_forward_from_tunnel_' + pattern
+    bigger_priority = priority + 1
+    flow = Flow(iot_switch_id, table_id, id, bigger_priority, cfg.ns)
+    f_match = [
+        Flow.in_port(tunnel[1]),
+        Flow.ethernet_type(2048),
+        Flow.ip_protocol(ip_protocol),
+        ['ipv4-source', dst_mask],
+        ['ipv4-destination', src_mask]
+    ]
+    flow.match(f_match)
+    flow.instructions([
+        Flow.go_to_table(table_id + 1)
+    ], [0])
+    cfg.push_flow(flow.switch, flow.body)
+    pushed_flows.append({'node_id': iot_switch_id, 'table_id': table_id, 'flow_id': id})
+
+    return pushed_flows
 
 def mirror_to_tunnel(cfg, pattern, iot_switch_id, table_id, priority, ids_tunnel):
 

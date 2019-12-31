@@ -45,6 +45,7 @@ class SensorsEnv:
             'som80',
             'honeypot',
             'drop_connections',
+            'firewall'
             #'block_incoming',
             #'block_outgoing'
         ]
@@ -300,7 +301,8 @@ class SensorsEnv:
         for category, key, idx in self.resolv['categories']:
             ip = next(ip_generator)
             self.containers[category][key][idx]['ip'] = ip
-            print(category,key,idx,ip,self.containers[category][key][idx]['ip'])
+            if self.debug:
+                print(category,key,idx,ip,self.containers[category][key][idx]['ip'])
             if category == 'attacker' and 'cc' in key:
                 cc_ip = ip
         self.resolv['ips'] = ips
@@ -313,7 +315,7 @@ class SensorsEnv:
 
         # remove honeypot and server isolation rules
 
-        for category in ['honeypot', 'server']:
+        for category in ['honeypot', 'server', 'firewall_in', 'firewall_out']:
             try:
                 network_obj = self.docker_cli.networks.get(category)
                 bridge_id = 'br-{0}'.format(network_obj.id[:12])
@@ -323,15 +325,18 @@ class SensorsEnv:
                 rule.create_target('DOCKER-ISOLATION-STAGE-2')
                 chain = iptc.Chain(iptc.Table(iptc.Table.FILTER), 'DOCKER-ISOLATION-STAGE-1')
                 chain.delete_rule(rule)
-            except:
+            except Exception as e:
+                print(e)
                 pass
 
         self.status = 'CREATED'
+        for switch in switches:
+            print(switch)
 
     def prepare_networks(self, roles, nets):
         networks = {}
         for net in nets:
-            n = sum([role['number'] for role in roles if role['network'] == net['name']])
+            n = sum([role['number'] for role in roles if role['network'] == net['name'] or net['name'] in role['network']])
             network = {
                 'name': net['name'],
                 'driver': 'bridge',
@@ -356,7 +361,10 @@ class SensorsEnv:
         for role,key,category in zip(roles,keys,categories):
             base = dict(self.container_base)
             base['network'] = role['network']
-            base['netmask'] = self.networks[role['network']]['subnet'].split('/')[-1]
+            if type(role['network']).__name__ == 'list':
+                base['netmask'] = [self.networks[rn]['subnet'].split('/')[-1] for rn in role['network']]
+            else:
+                base['netmask'] = self.networks[role['network']]['subnet'].split('/')[-1]
             base['image'] = role['image']
             if key == 'snort_community':
                 base['detach'] = True
@@ -382,7 +390,7 @@ class SensorsEnv:
                 base['cap'] = 'NET_ADMIN'
                 base['cmd'] = "/bin/bash"
                 base['exec_cmd'] = "python3 /usr/local/bin/anomaly_detector.py som 80"
-            elif key == 'honeypot':
+            elif key == 'honeypot' or key == 'firewall':
                 base['detach'] = True
                 base['tty'] = True
                 base['cap'] = 'NET_ADMIN'
@@ -398,11 +406,13 @@ class SensorsEnv:
             elif key == 'admin':
                 base['detach'] = True
                 base['tty'] = True
+                base['cap'] = 'SYS_PTRACE'
                 base['cmd'] = "/bin/bash"
                 base['exec_cmd'] = "python3 /usr/local/bin/admin.py"
             elif key == 'device':
                 base['detach'] = True
                 base['tty'] = True
+                base['cap'] = 'SYS_PTRACE'
                 base['cmd'] = "/bin/bash"
                 base['exec_cmd'] = "python3 /usr/local/bin/client.py"
                 base['dns'] = role['dns']['ips']
@@ -415,7 +425,13 @@ class SensorsEnv:
                 container = copy.deepcopy(base)
                 name = '{0}_{1}'.format(key, i + 1)
                 container['name'] = name
-                container['ip'] = next(self.networks[container['network']]['ip_generator'])
+                if type(container['network']).__name__ == 'list':
+                    container['ip'] = []
+                    for cn in container['network']:
+                        print(cn, container['network'], self.networks[cn])
+                        container['ip'].append(next(self.networks[cn]['ip_generator']))
+                else:
+                    container['ip'] = next(self.networks[container['network']]['ip_generator'])
                 if key == 'device':
                     device_ips.append(container['ip'])
                 container['volume'] = '{0}/{1}'.format(self.container_volumes_dir, name)
@@ -535,21 +551,35 @@ class SensorsEnv:
         vnf_ips = [container['ip'] for container in vnf_containers]
         for switch_key,switch in switches:
             for key in switch.keys():
-                if key in vnf_names:
+                if key in vnf_names or '{0}_in'.format(key) in vnf_names or '{0}_out'.format(key) in vnf_names:
                     ip = vnf_ips[vnf_names.index(key)]
-                    Popen(['ovs-vsctl', 'set', 'interface', key, 'options:remote_ip=' + ip])
-                    gw = '.'.join(ip.split('.')[:-1]) + '.1'
-                    container_obj = self.docker_cli.containers.get(key)
-                    container_obj.exec_run('ovs-vsctl set interface vxlan1 options:remote_ip={0}'.format(gw))
+                    if type(ip).__name__ == 'list' and len(ip) == 2:
+                        key_in = '{0}_in'.format(key)
+                        key_out = '{0}_in'.format(key)
+                        Popen(['ovs-vsctl', 'set', 'interface', key_in, 'options:remote_ip=' + ip[0]])
+                        gw = '.'.join(ip[0].split('.')[:-1]) + '.1'
+                        container_obj = self.docker_cli.containers.get(key)
+                        container_obj.exec_run('ovs-vsctl set interface vxlan1 options:remote_ip={0}'.format(gw))
+                        Popen(['ovs-vsctl', 'set', 'interface', key_out, 'options:remote_ip=' + ip[1]])
+                        gw = '.'.join(ip[1].split('.')[:-1]) + '.1'
+                        container_obj = self.docker_cli.containers.get(key)
+                        container_obj.exec_run('ovs-vsctl set interface vxlan2 options:remote_ip={0}'.format(gw))
+                    else:
+                        Popen(['ovs-vsctl', 'set', 'interface', key, 'options:remote_ip=' + ip])
+                        gw = '.'.join(ip.split('.')[:-1]) + '.1'
+                        container_obj = self.docker_cli.containers.get(key)
+                        container_obj.exec_run('ovs-vsctl set interface vxlan1 options:remote_ip={0}'.format(gw))
         for net in self.ovs_nets:
             for net_switch in net['switches']:
                 net_switch['vnf'] = []
                 for switch_key,switch in switches:
-                    print(net_switch['name'], switch_key)
+                    if self.debug:
+                        print(net_switch['name'], switch_key)
                     if net_switch['name'] == switch_key:
                         for port_key in switch.keys():
-                            print(port_key)
-                            if port_key in vnf_names:
+                            print('HERE:')
+                            print(port_key, vnf_names)
+                            if port_key in vnf_names or port_key in ['{0}_in'.format(name) for name in vnf_names] or port_key in ['{0}_out'.format(name) for name in vnf_names]:
                                 ofport = switch[port_key]['port']
                                 net_switch['vnf'].append((ofport, port_key))
 
@@ -565,8 +595,10 @@ class SensorsEnv:
             finally:
                 if container['network'] in [ovs_net['name'] for ovs_net in self.ovs_nets]:
                     network = 'none'
-                else:
+                elif type(container['network']).__name__ != 'list':
                     network = container['network']
+                else:
+                    network = container['network'][0]
                 self.docker_cli.containers.create(
                     name=container['name'],
                     image=container['image'],
@@ -639,13 +671,22 @@ class SensorsEnv:
                 container['switch'] = switch_selected['id']
                 container['ofport'] = get_iface_ofport(veth_h)
             else:
-                network_obj = self.docker_cli.networks.get(container['network'])
-                try:
-                    network_obj.disconnect(container_obj)
-                except:
-                    pass
-                finally:
-                    network_obj.connect(container_obj, ipv4_address=container['ip'])
+                if type(container['network']).__name__ != 'list':
+                    container_network = [container['network']]
+                else:
+                    container_network = container['network']
+                if type(container['ip']).__name__ != 'list':
+                    container_ip = [container['ip']]
+                else:
+                    container_ip = container['ip']
+                for cn,ci in zip(container_network, container_ip):
+                    network_obj = self.docker_cli.networks.get(cn)
+                    try:
+                        network_obj.disconnect(container_obj)
+                    except:
+                        pass
+                    finally:
+                        network_obj.connect(container_obj, ipv4_address=ci)
 
     def start_containers(self, containers):
         for container in containers:
@@ -658,9 +699,11 @@ class SensorsEnv:
                 cmd = container['exec_cmd'].split(' ')[:2]
                 ps_aux = container_obj.top(ps_args='aux')
                 ps_list = [p[-1].split(' ')[:2] for p in ps_aux['Processes']]
-                if cmd not in ps_list:
-                    print(container['exec_cmd'])
+                while cmd not in ps_list:
                     container_obj.exec_run(container['exec_cmd'], detach=True, tty=True)
+                    ps_aux = container_obj.top(ps_args='aux')
+                    ps_list = [p[-1].split(' ')[:2] for p in ps_aux['Processes']]
+                    print(ps_aux)
 
     def kill_process(self, container, prcs_prefix):
         container_obj = self.docker_cli.containers.get(container['name'])
@@ -1220,22 +1263,34 @@ class SensorsEnv:
         switch_id = self.containers['app']['device'][device_idx]['switch']
         tunnel = None
         switch_found = False
+        tunnel_2 = None
         for net in self.ovs_nets:
             if switch_found:
                 break
             for switch in net['switches']:
                 if switch['id'] == switch_id:
+                    print(switch)
                     for i in range(len(switch['vnf'])):
                         port, name = switch['vnf'][i]
                         if vnf_key is not None:
                             for container in self.containers['vnf'][vnf_key]:
+                                print(vnf_key, port, name, container['name'])
                                 if container['name'] == name:
                                     tunnel = port
                                     break
+                                elif '{0}_in'.format(container['name']) == name:
+                                    tunnel = port
+                                    if tunnel_2 is not None:
+                                        break
+                                elif '{0}_out'.format(container['name']) == name:
+                                    tunnel_2 = port
+                                    if tunnel is not None:
+                                        break
                     cfg = switch['cfg']
                     switch_found = True
                     break
-
+        if tunnel_2 is not None:
+            tunnel = [tunnel, tunnel_2]
         return cfg, switch, tunnel
 
     def before_forward_action(self, pattern, action_idx): # includes mirror and redirect actions
@@ -1311,7 +1366,7 @@ class SensorsEnv:
         return hp_container['nat_map']['octet'][idx]
 
     def spoof_pattern(self, hp_container, pattern, priority):
-        ip_protocol, src, dst = src_dst_ips(pattern)
+        ip_protocol, dst, src = src_dst_ips(pattern)  # only works for connections from outside to devices
         src_dst = src + '.' + dst
         nat_ip = '.'.join(hp_container['ovs_ip'].split('.')[0:3]) + '.{0}'.format(self.map_to_octet(hp_container, src_dst))
         rnd_mac, rnd_mac_str = encode_ip_as_mac(nat_ip.split('.'))
@@ -1327,6 +1382,23 @@ class SensorsEnv:
             priority, proto, nat_ip, encode_ip_as_mac(src.split('.'))[0], src, dst
         )
         container_obj.exec_run(cmd)
+
+    def forward_through_firewall_action(self, pattern, action_type, vnf_key='firewall', priority=20, table_id=5):
+        cfg, switch, tunnel = self.prepare_for_action(pattern, vnf_key)
+        #n_potted = [len(container['potted']) for container in self.containers['vnf']['honeypot']]
+        #hp_idx = np.argmin(n_potted)
+        proto, src, dst = src_dst_ips(pattern)
+        #hp_container = self.containers['vnf']['honeypot'][hp_idx]
+        #hp_container['potted'].append(dst)
+        if action_type == 1:
+            pushed_flows = forward_through_tunnel(cfg, pattern, switch['id'], table_id, priority, tunnel)
+            switch['flows'].extend(pushed_flows)
+        elif action_type == 0:
+            removed_flows = unforward_from_tunnel(cfg, pattern, switch['id'], table_id)
+            for flow in removed_flows:
+                while flow in switch['flows']:
+                    switch['flows'].remove(flow)
+        self.update_action_logs(pattern, key=vnf_key, value=action_type)
 
     def redirect_to_honeypot_action(self, pattern, action_type, vnf_key='honeypot', priority=20, table_id=5):
         cfg, switch, tunnel = self.prepare_for_action(pattern, vnf_key)

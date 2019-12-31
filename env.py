@@ -115,6 +115,15 @@ def take_step():
         # print(len(patterns), time() - s_time)
     return jsonify(env.action_logs.tolist())
 
+@app.route('/test_action', methods=['GET', 'POST'])
+def test_action():
+    if request.method == 'POST':
+        print(env.patterns)
+        pattern = '6.192.168.103.101.192.168.104.101'
+        #env.forward_through_snort_custom_action(pattern, 1, vnf_key='snort_custom', priority=20, table_id=5)
+        env.forward_through_firewall_action(pattern, 1)
+    return jsonify(env.action_logs.tolist())
+
 ### Auxiliary functions ###
 
 def load_scenario(fpath):
