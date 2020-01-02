@@ -61,6 +61,10 @@ def env_score_coeff(attack_name):
     a, b = env.get_score_coeff(attack_name)
     return jsonify(a, b)
 
+@app.route('/info')
+def get_info():
+    return jsonify(env.info)
+
 @app.route('/start_episode', methods=['POST'])
 def start_episode():
     data = request.data.decode('utf-8')
