@@ -1410,7 +1410,7 @@ class SensorsEnv:
         hp_idx = np.argmin(n_potted)
         proto, src, dst = src_dst_ips(pattern)
         hp_container = self.containers['vnf']['honeypot'][hp_idx]
-        hp_container['potted'].append(dst)
+        hp_container['potted'].append(src)  # here src is the device ip
         if action_type == 1:
             pushed_flows = forward_to_tunnel(cfg, pattern, switch['id'], table_id, priority, tunnel)
             switch['flows'].extend(pushed_flows)
