@@ -1222,9 +1222,6 @@ class SensorsEnv:
                                 alerts.append([ts] + [src] + remote)
             except:
                 pass
-        if self.debug:
-            if alerts:
-                print(alerts)
         self.update_vnf_logs(alerts, key='honeypot')
 
     def update_vnf_logs(self, alerts, key):
@@ -1246,8 +1243,9 @@ class SensorsEnv:
                     potted = [container['potted'] for container in self.containers['vnf']['honeypot'] if container['ip'] == alert[1]][0]
                     flows = [src_dst_pattern(alert[5], dev_ip, alert[3]) for dev_ip in potted if dev_ip in self.device_ips]
                 else:
-                    print(alert)
+                    print(key, alert)
             else:
+                flows = []
                 if self.debug:
                     print('Unknown alert: {0}'.format(alert))
             for flow in flows:
