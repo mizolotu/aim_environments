@@ -1244,9 +1244,9 @@ class SensorsEnv:
                 hp_ips = [container['ip'] for container in self.containers['vnf']['honeypot']]
                 if alert[1] in hp_ips:
                     potted = [container['potted'] for container in self.containers['vnf']['honeypot'] if container['ip'] == alert[1]][0]
+                    flows = [src_dst_pattern(alert[5], dev_ip, alert[3]) for dev_ip in potted if dev_ip in self.device_ips]
                 else:
                     print(alert)
-                flows = [src_dst_pattern(alert[5], dev_ip, alert[3]) for dev_ip in potted]
             else:
                 if self.debug:
                     print('Unknown alert: {0}'.format(alert))
