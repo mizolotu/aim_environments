@@ -1225,7 +1225,6 @@ class SensorsEnv:
         if self.debug:
             if alerts:
                 print(alerts)
-        if alerts: print(alerts)
         self.update_vnf_logs(alerts, key='honeypot')
 
     def update_vnf_logs(self, alerts, key):
@@ -1236,19 +1235,28 @@ class SensorsEnv:
         for alert in alerts:
             if self.debug:
                 print('Alert by {0}: {1}'.format(key, alert))
-            if alert[1] in self.device_ips:
-                flow = src_dst_pattern(alert[5], alert[1], alert[3])
-            elif alert[3] in self.device_ips:
-                flow = src_dst_pattern(alert[5], alert[3], alert[1])
+            if alert[1] in self.device_ips or alert[3] in self.device_ips:
+                flows = [
+                    src_dst_pattern(alert[5], alert[1], alert[3]),
+                    src_dst_pattern(alert[5], alert[3], alert[1])
+                ]
+            elif key == 'honeypot':
+                hp_ips = [container['ip'] for container in self.containers['vnf']['honeypot']]
+                if alert[1] in hp_ips:
+                    potted = [container['potted'] for container in self.containers['vnf']['honeypot'] if container['ip'] == alert[1]][0]
+                else:
+                    print(alert)
+                flows = [src_dst_pattern(alert[5], dev_ip, alert[3]) for dev_ip in potted]
             else:
                 if self.debug:
                     print('Unknown alert: {0}'.format(alert))
-            idx = flow_follows_pattern(flow, self.patterns)
-            if idx >= 0:
-                t_alert = float(alert[0])
-                log_features[idx] += 1
-                if t_now - t_alert <= self.time_threshold:
-                    current_features[idx] += 1
+            for flow in flows:
+                idx = flow_follows_pattern(flow, self.patterns)
+                if idx >= 0:
+                    t_alert = float(alert[0])
+                    log_features[idx] += 1
+                    if t_now - t_alert <= self.time_threshold:
+                        current_features[idx] += 1
         i = self.vnf_categories.index(key)
         if n_patterns > 0:
             self.vnf_logs[:,i] = current_features
