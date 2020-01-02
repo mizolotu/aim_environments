@@ -227,16 +227,7 @@ def init_flow_tables(cfg, switch_id, patch_id, priority, n_tables=10):
     tables = []
     for i in range(n_tables):
         tables.append({'id': i, 'flows': []})
-        if i == n_tables - 1:
-            id = 'table{0}_to_table{1}'.format(i, i + 1)
-            flow = Flow(switch_id, i, id, priority, cfg.ns)
-            flow.instructions([
-                Flow.go_to_table(i + 1),
-                ['apply-actions', [
-                    {'action': [Flow.output_to_port(patch_id)], 'order': 0, 'ns': 'f'}
-                ]]
-            ], [0, 1])
-        elif i < n_tables - 1:
+        if i < n_tables - 1:
             id = 'table{0}_to_table{1}'.format(i,i+1)
             flow = Flow(switch_id, i, id, priority, cfg.ns)
             flow.instructions([
@@ -246,7 +237,12 @@ def init_flow_tables(cfg, switch_id, patch_id, priority, n_tables=10):
             id = 'table{0}_normal'.format(i)
             flow = Flow(switch_id, i, id, priority, cfg.ns)
             flow.instructions([
-                ['apply-actions', [{'action': [Flow.output_to_port('NORMAL')], 'order': 0, 'ns': 'f'}]]
+                [
+                    'apply-actions', [
+                        {'action': [Flow.output_to_port('NORMAL')], 'order': 1, 'ns': 'f'},
+                        {'action': [Flow.output_to_port(patch_id)], 'order': 0, 'ns': 'f'}
+                    ]
+                ]
             ], [0])
         tables[i]['flows'].append(flow)
 

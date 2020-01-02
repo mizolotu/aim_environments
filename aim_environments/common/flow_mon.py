@@ -92,6 +92,7 @@ class FlowMonitor():
                     print(body)
                     print(e)
                 thr = start_time + self.threshold
+                print(thr - timestamp)
                 if float(timestamp) > thr or (self.pkt_queue.qsize() == 0 and float(t_now) > thr):
                     break
             # process flow callback
