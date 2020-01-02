@@ -1269,12 +1269,10 @@ class SensorsEnv:
                 break
             for switch in net['switches']:
                 if switch['id'] == switch_id:
-                    print(switch)
                     for i in range(len(switch['vnf'])):
                         port, name = switch['vnf'][i]
                         if vnf_key is not None:
                             for container in self.containers['vnf'][vnf_key]:
-                                print(vnf_key, port, name, container['name'])
                                 if container['name'] == name:
                                     tunnel = port
                                     break
