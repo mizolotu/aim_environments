@@ -227,7 +227,7 @@ def init_flow_tables(cfg, switch_id, patch_id, priority, n_tables=10):
     tables = []
     for i in range(n_tables):
         tables.append({'id': i, 'flows': []})
-        if i == 0:
+        if i == n_tables - 1:
             id = 'table{0}_to_table{1}'.format(i, i + 1)
             flow = Flow(switch_id, i, id, priority, cfg.ns)
             flow.instructions([
