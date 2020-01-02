@@ -1229,9 +1229,9 @@ class SensorsEnv:
         log_features = np.zeros(n_patterns)
         current_features = np.zeros(n_patterns)
         t_now = time()
+        if self.debug:
+            print('Alerts by {0}: {1}'.format(key, len(alerts)))
         for alert in alerts:
-            if self.debug:
-                print('Alert by {0}: {1}'.format(key, alert))
             if alert[1] in self.device_ips or alert[3] in self.device_ips:
                 flows = [
                     src_dst_pattern(alert[5], alert[1], alert[3]),
