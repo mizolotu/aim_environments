@@ -304,8 +304,8 @@ def forward_to_tunnel(cfg, pattern, iot_switch_id, table_id, priority, tunnel):
 def unforward_from_tunnel(cfg, pattern, iot_switch_id, table_id):
     removed_flows = []
     ids = [
-        'table' + str(table_id) + '_forward_outgoing_to_tunnel_' + pattern,
-        'table' + str(table_id) + '_forward_incoming_to_tunnel_' + pattern
+        'table' + str(table_id) + '_forward_to_tunnel_' + pattern,
+        'table' + str(table_id) + '_forward_from_tunnel_' + pattern
     ]
     tables = [
         table_id,
