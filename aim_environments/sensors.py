@@ -1644,7 +1644,7 @@ class SensorsEnv:
         requests.post(url, json=jdata)
 
     def scan_attack(self):
-        url, bee_ips, target_ips, potential_target_ips = self._attack()
+        url, bee_ips, target_ips, potential_target_ips = self._attack(target_prefix=['data', 'unknown'])
         dns_ips = []
         for container in self.containers['app']['device']:
             for dns_ip in container['dns']:
@@ -1667,7 +1667,7 @@ class SensorsEnv:
         requests.post(url, json=jdata)
 
     def exploit_attack(self):
-        url, bee_ips, target_ips, potential_target_ips = self._attack()
+        url, bee_ips, target_ips, potential_target_ips = self._attack(target_prefix=['data', 'unknown'])
         dns_ips = []
         for container in self.containers['app']['device']:
             for dns_ip in container['dns']:
@@ -1690,7 +1690,7 @@ class SensorsEnv:
         requests.post(url, json=jdata)
 
     def slowloris_attack(self):
-        url, bee_ips, target_ips, potential_target_ips = self._attack(target_prefix = 'unknown')
+        url, bee_ips, target_ips, potential_target_ips = self._attack(target_prefix=['unknown'])
         dns_ips = []
         for container in self.containers['app']['device']:
             for dns_ip in container['dns']:
