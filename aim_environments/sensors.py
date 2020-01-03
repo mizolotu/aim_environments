@@ -1575,7 +1575,7 @@ class SensorsEnv:
                 else:
                     self.info['normal_flows']['target'].append('.'.join(['6', c1['ip'], c2['ip']]))
             for dns_ip in dns_ips:
-                if c1 in bee_ips:
+                if c1['ip'] in bee_ips:
                     self.info['attack_flows']['cc'].append('.'.join(['17', c1['ip'], dns_ip]))
                 else:
                     self.info['normal_flows']['cc'].append('.'.join(['17', c1['ip'], dns_ip]))
