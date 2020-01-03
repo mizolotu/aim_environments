@@ -100,7 +100,7 @@
   "app": {
     "server": {
       "network": "server",
-      "number": 2,
+      "number": 8,
       "image": "iot/sensor",
       "names": [
         "data1.server.jyu.fi",
@@ -111,14 +111,14 @@
     },
     "admin": {
       "network": "admin",
-      "number": 2,
+      "number": 10,
       "image": "iot/sensor",
       "port": 22,
       "proto": 6
     },
     "device": {
       "network": "iot",
-      "number": 2,
+      "number": 10,
       "image": "iot/sensor",
       "dns": {
         "ips": ["192.168.103.1"],
