@@ -104,7 +104,13 @@
       "image": "iot/sensor",
       "names": [
         "data1.server.jyu.fi",
-        "unknown1.server.jyu.fi"
+        "data2.server.jyu.fi",
+        "data3.server.jyu.fi",
+        "data4.server.jyu.fi",
+        "unknown1.server.jyu.fi",
+        "unknown2.server.jyu.fi",
+        "unknown3.server.jyu.fi",
+        "unknown4.server.jyu.fi"
       ],
       "port": 80,
       "proto": 6
