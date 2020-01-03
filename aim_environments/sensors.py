@@ -577,8 +577,6 @@ class SensorsEnv:
                         print(net_switch['name'], switch_key)
                     if net_switch['name'] == switch_key:
                         for port_key in switch.keys():
-                            print('HERE:')
-                            print(port_key, vnf_names)
                             if port_key in vnf_names or port_key in ['{0}_in'.format(name) for name in vnf_names] or port_key in ['{0}_out'.format(name) for name in vnf_names]:
                                 ofport = switch[port_key]['port']
                                 net_switch['vnf'].append((ofport, port_key))
@@ -703,7 +701,6 @@ class SensorsEnv:
                     container_obj.exec_run(container['exec_cmd'], detach=True, tty=True)
                     ps_aux = container_obj.top(ps_args='aux')
                     ps_list = [p[-1].split(' ')[:2] for p in ps_aux['Processes']]
-                    print(ps_aux)
 
     def kill_process(self, container, prcs_prefix):
         container_obj = self.docker_cli.containers.get(container['name'])
@@ -1031,7 +1028,10 @@ class SensorsEnv:
                             counts[4] += number_of_packets
                             self.info['normal_flow_counts']['admin'] += number_of_packets
                         if flow in self.info['normal_flows']['cc'] or flow in self.info['attack_flows']['cc'] and device_ip not in self.info['infected_devices']:
-                            coeff = 1.0 / len(self.info['normal_flows']['cc'])
+                            nn = len(self.info['normal_flows']['cc']) + len(
+                                [f for f in self.info['attack_flows']['cc'] if '.'.join(f.split('.')[1:5]) not in self.info['infected_devices']]
+                            )
+                            coeff = 1.0 / nn
                         elif flow in self.info['normal_flows']['target']:
                             coeff = 1.0 / len(self.info['normal_flows']['target'])
                         else:
