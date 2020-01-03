@@ -1,0 +1,154 @@
+{
+
+  "engine": "sensors",
+
+  "nets": [
+    {
+      "name": "ids",
+      "start": "172.20.100.11",
+      "mask": 24
+    },
+    {
+      "name": "honeypot",
+      "start": "172.20.110.11",
+      "mask": 24
+    },
+    {
+      "name": "iot",
+      "start": "192.168.103.101",
+      "mask": 16
+    },
+    {
+      "name": "admin",
+      "start": "192.168.104.101",
+      "mask": 16
+    },
+    {
+      "name": "server",
+      "start": "172.20.200.101",
+      "mask": 24
+    }
+  ],
+
+  "ovs_nets": [
+    {
+      "name": "iot",
+      "switches": [
+        {
+          "name": "iot_1",
+          "connect_to": ["admin_1"]
+        }
+      ],
+      "gw_switch": "iot_1"
+    },
+    {
+      "name": "admin",
+      "switches": [
+        {
+          "name": "admin_1",
+          "connect_to": ["iot_1"]
+        }
+      ],
+      "gw_switch": "iot_1"
+    }
+  ],
+
+  "sdn": {
+    "ip": "127.0.0.1",
+    "port": 6653,
+    "switches": [
+      "iot_1"
+    ],
+    "access": {
+      "api_port": 8181,
+      "api_credentials": {
+        "username": "admin",
+        "password": "admin"
+      }
+    }
+  },
+
+  "vnf": {
+    "snort_community": {
+      "number": 1,
+      "image": "vnf/snort",
+      "network": "ids"
+    },
+    "snort_custom": {
+      "number": 1,
+      "image": "vnf/snort",
+      "network": "ids"
+    },
+    "som53": {
+      "number": 1,
+      "image": "vnf/anomaly",
+      "network": "ids"
+    },
+    "som80": {
+      "number": 1,
+      "image": "vnf/anomaly",
+      "network": "ids"
+    },
+    "honeypot": {
+      "number": 1,
+      "image": "vnf/honeypot",
+      "network": "honeypot",
+      "ovs_ip": "172.20.103.1"
+    }
+  },
+
+  "app": {
+    "server": {
+      "network": "server",
+      "number": 6,
+      "image": "iot/sensor",
+      "names": [
+        "data1.server.jyu.fi",
+        "data2.server.jyu.fi",
+        "data3.server.jyu.fi",
+        "unknown1.server.jyu.fi",
+        "unknown2.server.jyu.fi",
+        "unknown3.server.jyu.fi"
+      ],
+      "port": 80,
+      "proto": 6
+    },
+    "admin": {
+      "network": "admin",
+      "number": 8,
+      "image": "iot/sensor",
+      "port": 22,
+      "proto": 6
+    },
+    "device": {
+      "network": "iot",
+      "number": 8,
+      "image": "iot/sensor",
+      "dns": {
+        "ips": ["192.168.103.1"],
+        "local_file": "/etc/bind/named.conf.local",
+        "z_file": "/etc/bind/db.local",
+        "rz_file": "/etc/bind/db.200"
+      }
+    }
+  },
+
+  "attacker": {
+    "botnet_cc": {
+      "number": 1,
+      "image": "attacker/server",
+      "network": "server",
+      "names": [
+        "cc.server.jyu.fi"
+      ]
+    },
+    "malware_server": {
+      "number": 1,
+      "image": "attacker/server",
+      "network": "server",
+      "names": [
+        "malware.server.jyu.fi"
+      ]
+    }
+  }
+}
