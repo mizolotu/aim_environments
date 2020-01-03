@@ -1011,13 +1011,13 @@ class SensorsEnv:
                     device_ip = '.'.join(flow.split('.')[1:5])
                     number_of_packets = flow_label[1] + flow_label[2]
                     if flow in self.info['attack_flows']['target']:
-                        coeff = - self.score_a * (1 - gain)
+                        coeff = (gain - 1.0) / len(self.info['attack_flows']['target'])
                         counts[0] += number_of_packets
                         self.info['attack_flow_counts']['target'] += number_of_packets
                         if self.debug:
                             print('Attack flow {0}: {1} packets'.format(flow, number_of_packets))
                     elif flow in self.info['attack_flows']['cc'] and device_ip in self.info['infected_devices']:
-                        coeff = - self.score_b * (1 - gain)
+                        coeff = (gain - 1.0) / len(self.info['attack_flow_counts']['cc'])
                         counts[1] += number_of_packets
                         self.info['attack_flow_counts']['cc'] += number_of_packets
                         if self.debug:
@@ -1573,6 +1573,7 @@ class SensorsEnv:
         self.info['attack_flows']['cc'] = ['.'.join(['17', ip, dns_ip]) for ip in bee_ips for dns_ip in dns_ips]
         self.info['attack_flow_counts']['target'] = 0
         self.info['attack_flow_counts']['cc'] = 0
+        self.attack_coeffs = []
         random.shuffle(bee_ips)
         cmd = 'python3 {0} {1}'.format(remote_path, ','.join(bee_ips))
         queen_cmd = ' '.join(cmd.split(' ')[0:2])
