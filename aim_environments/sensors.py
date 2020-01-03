@@ -1408,20 +1408,21 @@ class SensorsEnv:
         n_potted = [len(container['potted']) for container in self.containers['vnf']['honeypot']]
         hp_idx = np.argmin(n_potted)
         proto, src, dst = src_dst_ips(pattern)
-        hp_container = self.containers['vnf']['honeypot'][hp_idx]
-        hp_container['potted'].append(src)  # here src is the device ip
-        if action_type == 1:
-            pushed_flows = forward_to_tunnel(cfg, pattern, switch['id'], table_id, priority, tunnel)
-            switch['flows'].extend(pushed_flows)
-            src_dst = '{0}.{1}'.format(src, dst)
-            if src_dst not in hp_container['nat_map']['src_dst']:
-                self.spoof_pattern(hp_container, pattern, priority)
-        elif action_type == 0:
-            removed_flows = unforward_from_tunnel(cfg, pattern, switch['id'], table_id)
-            for flow in removed_flows:
-                while flow in switch['flows']:
-                    switch['flows'].remove(flow)
-        self.update_action_logs(pattern, key=vnf_key, value=action_type)
+        if src in self.device_ips:
+            hp_container = self.containers['vnf']['honeypot'][hp_idx]
+            hp_container['potted'].append(src)  # here src is the device ip
+            if action_type == 1:
+                pushed_flows = forward_to_tunnel(cfg, pattern, switch['id'], table_id, priority, tunnel)
+                switch['flows'].extend(pushed_flows)
+                src_dst = '{0}.{1}'.format(src, dst)
+                if src_dst not in hp_container['nat_map']['src_dst']:
+                    self.spoof_pattern(hp_container, pattern, priority)
+            elif action_type == 0:
+                removed_flows = unforward_from_tunnel(cfg, pattern, switch['id'], table_id)
+                for flow in removed_flows:
+                    while flow in switch['flows']:
+                        switch['flows'].remove(flow)
+            self.update_action_logs(pattern, key=vnf_key, value=action_type)
 
     def drop_connections_action(self, pattern, action_type, priority=30, table_id=6):
         cfg, switch, tunnel = self.prepare_for_action(pattern)
@@ -1592,27 +1593,29 @@ class SensorsEnv:
         self.copy_to_container(local_path, queen_container_obj, remote_path)
         queen_container_obj.exec_run(cmd)
 
-    def _attack(self, target_prefix=''):
+    def _attack(self, target_prefixes=[]):
         self.attack_containers = []
         cc_container = self.containers['attacker']['botnet_cc'][0]
         cc_ip = cc_container['ip']
         url = 'http://{0}/command'.format(cc_ip)
-        potential_target_names = [
-            ip for name, ip in zip(self.resolv['names'], self.resolv['ips']) if name.startswith(target_prefix)
-        ]
+        potential_target_ips = []
+        for name, ip in zip(self.resolv['names'], self.resolv['ips']):
+            for tp in target_prefixes:
+                if name.startswith(tp):
+                    potential_target_ips.append(ip)
         if self.log_packets:
             n_targets = 1
         else:
-            n_targets = random.randint(1, len(potential_target_names))
-        shuffle(potential_target_names)
-        targets = potential_target_names[:n_targets]
+            n_targets = random.randint(1, len(potential_target_ips))
+        shuffle(potential_target_ips)
+        target_ips = potential_target_ips[:n_targets]
         local_path = '/home/env/Defender/iot/malware/beerai/bee.py'
         remote_path = '/tmp/bee.py'
         potential_bee_containers = self.containers['app']['device']
         shuffle(potential_bee_containers)
         n = len(potential_bee_containers) // 2 + 1
         bee_containers = potential_bee_containers[0:n]
-        bees = [container['ip'] for container in bee_containers]
+        bee_ips = [container['ip'] for container in bee_containers]
         bee_cmd = 'python3 {0}'.format(remote_path)
         for bee_container in bee_containers:
             self.attack_containers.append((bee_container, bee_cmd))
@@ -1620,62 +1623,93 @@ class SensorsEnv:
             self.copy_to_container(local_path, bee_container_obj, remote_path)
             _, _ = bee_container_obj.exec_run(bee_cmd, detach=True, tty=True)
             print(bee_container['name'], bee_container['ip'])
-        return url, bees, targets
+        return url, bee_ips, target_ips, potential_target_ips
 
     def exfiltration_attack(self):
-        url, bees, targets = self._attack()
+        url, bee_ips, _, _ = self._attack()
         dns_ips = []
         for container in self.containers['app']['device']:
             for dns_ip in container['dns']:
                 if dns_ip not in dns_ips:
                     dns_ips.append(dns_ip)
-        self.info['attack_flows']['target'] = []
-        self.info['attack_flows']['cc'] = ['.'.join(['17', bee_ip, dns_ip]) for bee_ip in bees for dns_ip in dns_ips]
+        for c1 in self.containers['app']['device']:
+            for dns_ip in dns_ips:
+                if c1['ip'] in bee_ips:
+                    self.info['attack_flows']['cc'].append('.'.join(['17', c1['ip'], dns_ip]))
+                else:
+                    self.info['normal_flows']['cc'].append('.'.join(['17', c1['ip'], dns_ip]))
         self.info['attack_flow_counts']['target'] = 0
         self.info['attack_flow_counts']['cc'] = 0
         jdata = {'command': 'exfiltrate'}
         requests.post(url, json=jdata)
 
     def scan_attack(self):
-        url, bees, targets = self._attack()
+        url, bee_ips, target_ips, potential_target_ips = self._attack()
         dns_ips = []
         for container in self.containers['app']['device']:
             for dns_ip in container['dns']:
                 if dns_ip not in dns_ips:
                     dns_ips.append(dns_ip)
-        self.info['attack_flows']['target'] = ['.'.join(['6', bee_ip, target_ip]) for bee_ip in bees for target_ip in targets]
-        self.info['attack_flows']['cc'] = ['.'.join(['17', bee_ip, dns_ip]) for bee_ip in bees for dns_ip in dns_ips]
+        for c1 in self.containers['app']['device']:
+            for c2_ip in potential_target_ips:
+                if c1['ip'] in bee_ips and c2_ip in target_ips :
+                    self.info['attack_flows']['target'].append('.'.join(['6', c1['ip'], c2_ip]))
+                else:
+                    self.info['normal_flows']['target'].append('.'.join(['6', c1['ip'], c2_ip]))
+            for dns_ip in dns_ips:
+                if c1['ip'] in bee_ips:
+                    self.info['attack_flows']['cc'].append('.'.join(['17', c1['ip'], dns_ip]))
+                else:
+                    self.info['normal_flows']['cc'].append('.'.join(['17', c1['ip'], dns_ip]))
         self.info['attack_flow_counts']['target'] = 0
         self.info['attack_flow_counts']['cc'] = 0
-        jdata = {'command': 'scan_', 'target': targets}
+        jdata = {'command': 'scan_', 'target': target_ips}
         requests.post(url, json=jdata)
 
     def exploit_attack(self):
-        url, bees, targets = self._attack()
+        url, bee_ips, target_ips, potential_target_ips = self._attack()
         dns_ips = []
         for container in self.containers['app']['device']:
             for dns_ip in container['dns']:
                 if dns_ip not in dns_ips:
                     dns_ips.append(dns_ip)
-        self.info['attack_flows']['target'] = ['.'.join(['6', bee_ip, target_ip]) for bee_ip in bees for target_ip in targets]
-        self.info['attack_flows']['cc'] = ['.'.join(['17', bee_ip, dns_ip]) for bee_ip in bees for dns_ip in dns_ips]
+        for c1 in self.containers['app']['device']:
+            for c2_ip in potential_target_ips:
+                if c1['ip'] in bee_ips and c2_ip in target_ips :
+                    self.info['attack_flows']['target'].append('.'.join(['6', c1['ip'], c2_ip]))
+                else:
+                    self.info['normal_flows']['target'].append('.'.join(['6', c1['ip'], c2_ip]))
+            for dns_ip in dns_ips:
+                if c1['ip'] in bee_ips:
+                    self.info['attack_flows']['cc'].append('.'.join(['17', c1['ip'], dns_ip]))
+                else:
+                    self.info['normal_flows']['cc'].append('.'.join(['17', c1['ip'], dns_ip]))
         self.info['attack_flow_counts']['target'] = 0
         self.info['attack_flow_counts']['cc'] = 0
-        jdata = {'command': 'exploit_', 'target': targets}
+        jdata = {'command': 'exploit_', 'target': target_ips}
         requests.post(url, json=jdata)
 
     def slowloris_attack(self):
-        url, bees, targets = self._attack(target_prefix = 'unknown')
+        url, bee_ips, target_ips, potential_target_ips = self._attack(target_prefix = 'unknown')
         dns_ips = []
         for container in self.containers['app']['device']:
             for dns_ip in container['dns']:
                 if dns_ip not in dns_ips:
                     dns_ips.append(dns_ip)
-        self.info['attack_flows']['target'] = ['.'.join(['6', bee_ip, target_ip]) for bee_ip in bees for target_ip in targets]
-        self.info['attack_flows']['cc'] = ['.'.join(['17', bee_ip, dns_ip]) for bee_ip in bees for dns_ip in dns_ips]
+        for c1 in self.containers['app']['device']:
+            for c2_ip in potential_target_ips:
+                if c1['ip'] in bee_ips and c2_ip in target_ips :
+                    self.info['attack_flows']['target'].append('.'.join(['6', c1['ip'], c2_ip]))
+                else:
+                    self.info['normal_flows']['target'].append('.'.join(['6', c1['ip'], c2_ip]))
+            for dns_ip in dns_ips:
+                if c1['ip'] in bee_ips:
+                    self.info['attack_flows']['cc'].append('.'.join(['17', c1['ip'], dns_ip]))
+                else:
+                    self.info['normal_flows']['cc'].append('.'.join(['17', c1['ip'], dns_ip]))
         self.info['attack_flow_counts']['target'] = 0
         self.info['attack_flow_counts']['cc'] = 0
-        jdata = {'command': 'slowloris_', 'target': targets}
+        jdata = {'command': 'slowloris_', 'target': target_ips}
         requests.post(url, json=jdata)
 
     def start_episode(self, attack_name=None, start_time=0):
