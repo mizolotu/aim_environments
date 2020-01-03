@@ -1568,17 +1568,17 @@ class SensorsEnv:
             for dns_ip in container['dns']:
                 if dns_ip not in dns_ips:
                     dns_ips.append(dns_ip)
-        for ip1 in self.containers['app']['device']:
-            for ip2 in self.containers['app']['admin']:
-                if ip1 in bee_ips and ip2 == queen_container['ip']:
-                    self.info['attack_flows']['target'].append('.'.join(['6', ip1, ip2]))
+        for c1 in self.containers['app']['device']:
+            for c2 in self.containers['app']['admin']:
+                if c1['ip'] in bee_ips and c2['ip'] == queen_container['ip']:
+                    self.info['attack_flows']['target'].append('.'.join(['6', c1['ip'], c2['ip']]))
                 else:
-                    self.info['normal_flows']['target'].append('.'.join(['6', ip1, ip2]))
+                    self.info['normal_flows']['target'].append('.'.join(['6', c1['ip'], c2['ip']]))
             for dns_ip in dns_ips:
-                if ip1 in bee_ips:
-                    self.info['attack_flows']['cc'].append('.'.join(['17', ip1, dns_ip]))
+                if c1 in bee_ips:
+                    self.info['attack_flows']['cc'].append('.'.join(['17', c1['ip'], dns_ip]))
                 else:
-                    self.info['normal_flows']['cc'].append('.'.join(['17', ip1, dns_ip]))
+                    self.info['normal_flows']['cc'].append('.'.join(['17', c1['ip'], dns_ip]))
         self.info['attack_flow_counts']['target'] = 0
         self.info['attack_flow_counts']['cc'] = 0
         self.attack_coeffs = []
