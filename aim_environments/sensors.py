@@ -1023,19 +1023,20 @@ class SensorsEnv:
                     else:
                         remote_subnet = '.'.join(flow.split('.')[5:8])
                         if remote_subnet in self.dns_subnets and flow_label[0] == 2: # i.e. DNS
-                            coeff = 1.0 / len(self.info['normal_flows']['cc'])
-                            counts[2] += number_of_packets
                             self.info['normal_flow_counts']['dns'] += number_of_packets
                         elif remote_subnet in self.to_be_resolved_subnets:
-                            coeff = 1.0 / len(self.info['normal_flows']['target'])
                             counts[3] += number_of_packets
                             self.info['normal_flow_counts']['device'] += number_of_packets
                         else:
-                            coeff = 1.0 / len(self.info['normal_flows']['target'])
                             counts[4] += number_of_packets
                             self.info['normal_flow_counts']['admin'] += number_of_packets
+                        if flow in self.info['normal_flows']['cc'] or flow in self.info['attack_flows']['cc'] and device_ip not in self.info['infected_devices']:
+                            coeff = 1.0 / len(self.info['normal_flows']['cc'])
+                        elif flow in self.info['normal_flows']['target']:
+                            coeff = 1.0 / len(self.info['normal_flows']['target'])
+                        else:
+                            coeff = 0.01
                     reward[idx] = coeff * number_of_packets
-
                 self.current_flows = list(current_flows)
                 self.state_f = np.array(state_f)
                 time_since_last_action = time() - self.time_of_last_action
