@@ -179,7 +179,11 @@ def test_env(attacks, episode_duration, start_time, policy=None, attack=None):
         env.reset()
 
 if __name__ == '__main__':
-    scenario_path = 'aim_environments/scenarios/sensors.json'
+    if 'small' in sys.argv:
+        scenario_path = 'aim_environments/scenarios/sensors_small.json'
+        print(scenario_path)
+    else:
+        scenario_path = 'aim_environments/scenarios/sensors.json'
     scenario = load_scenario(scenario_path)
     env = sensors.SensorsEnv()
     env.create_scenario(scenario)
