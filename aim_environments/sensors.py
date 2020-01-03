@@ -815,10 +815,8 @@ class SensorsEnv:
             'attack': '',
             'normal_flow_counts': {'dns': 0, 'device': 0, 'admin': 0},
             'attack_flow_counts': {'target': 0, 'cc': 0},
-            'attack_flows': {
-                'target': [],
-                'cc': []
-            },
+            'attack_flows': {'target': [], 'cc': []},
+            'normal_flows': {'target': [], 'cc': []},
             'infected_devices': []
         }
 
@@ -1017,7 +1015,7 @@ class SensorsEnv:
                         if self.debug:
                             print('Attack flow {0}: {1} packets'.format(flow, number_of_packets))
                     elif flow in self.info['attack_flows']['cc'] and device_ip in self.info['infected_devices']:
-                        coeff = (gain - 1.0) / len(self.info['attack_flow_counts']['cc'])
+                        coeff = (gain - 1.0) / len(self.info['attack_flows']['cc'])
                         counts[1] += number_of_packets
                         self.info['attack_flow_counts']['cc'] += number_of_packets
                         if self.debug:
@@ -1025,15 +1023,15 @@ class SensorsEnv:
                     else:
                         remote_subnet = '.'.join(flow.split('.')[5:8])
                         if remote_subnet in self.dns_subnets and flow_label[0] == 2: # i.e. DNS
-                            coeff = self.gamma
+                            coeff = 1.0 / len(self.info['normal_flows']['cc'])
                             counts[2] += number_of_packets
                             self.info['normal_flow_counts']['dns'] += number_of_packets
                         elif remote_subnet in self.to_be_resolved_subnets:
-                            coeff = 1
+                            coeff = 1.0 / len(self.info['normal_flows']['target'])
                             counts[3] += number_of_packets
                             self.info['normal_flow_counts']['device'] += number_of_packets
                         else:
-                            coeff = 1
+                            coeff = 1.0 / len(self.info['normal_flows']['target'])
                             counts[4] += number_of_packets
                             self.info['normal_flow_counts']['admin'] += number_of_packets
                     reward[idx] = coeff * number_of_packets
@@ -1569,8 +1567,17 @@ class SensorsEnv:
             for dns_ip in container['dns']:
                 if dns_ip not in dns_ips:
                     dns_ips.append(dns_ip)
-        self.info['attack_flows']['target'] = ['.'.join(['6', ip, queen_container['ip']]) for ip in bee_ips]
-        self.info['attack_flows']['cc'] = ['.'.join(['17', ip, dns_ip]) for ip in bee_ips for dns_ip in dns_ips]
+        for ip1 in self.containers['app']['device']:
+            for ip2 in self.containers['app']['admin']:
+                if ip1 in bee_ips and ip2 == queen_container['ip']:
+                    self.info['attack_flows']['target'].append('.'.join(['6', ip1, ip2]))
+                else:
+                    self.info['normal_flows']['target'].append('.'.join(['6', ip1, ip2]))
+            for dns_ip in dns_ips:
+                if ip1 in bee_ips:
+                    self.info['attack_flows']['cc'].append('.'.join(['17', ip1, dns_ip]))
+                else:
+                    self.info['normal_flows']['cc'].append('.'.join(['17', ip1, dns_ip]))
         self.info['attack_flow_counts']['target'] = 0
         self.info['attack_flow_counts']['cc'] = 0
         self.attack_coeffs = []
@@ -1740,6 +1747,7 @@ class SensorsEnv:
         if self.debug:
             print('\n{0}\n'.format(self.status))
         self.info['attack_flows'] = {'target': [], 'cc': []}
+        self.info['normal_flows'] = {'target': [], 'cc': []}
         self.info['attack_flow_counts'] = {'target': 0, 'cc': 0}
         self.info['normal_flow_counts'] = {'dns': 0, 'device': 0, 'admin': 0}
 
