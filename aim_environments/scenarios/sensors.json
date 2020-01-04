@@ -100,22 +100,18 @@
   "app": {
     "server": {
       "network": "server",
-      "number": 6,
+      "number": 2,
       "image": "iot/sensor",
       "names": [
         "data1.server.jyu.fi",
-        "data2.server.jyu.fi",
-        "data3.server.jyu.fi",
-        "unknown1.server.jyu.fi",
-        "unknown2.server.jyu.fi",
-        "unknown3.server.jyu.fi"
+        "unknown1.server.jyu.fi"
       ],
       "port": 80,
       "proto": 6
     },
     "admin": {
       "network": "admin",
-      "number": 8,
+      "number": 4,
       "image": "iot/sensor",
       "port": 22,
       "proto": 6
