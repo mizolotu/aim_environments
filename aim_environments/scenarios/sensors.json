@@ -111,14 +111,14 @@
     },
     "admin": {
       "network": "admin",
-      "number": 4,
+      "number": 3,
       "image": "iot/sensor",
       "port": 22,
       "proto": 6
     },
     "device": {
       "network": "iot",
-      "number": 8,
+      "number": 5,
       "image": "iot/sensor",
       "dns": {
         "ips": ["192.168.103.1"],
