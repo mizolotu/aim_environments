@@ -118,6 +118,7 @@
     },
     "device": {
       "network": "iot",
+
       "number": 5,
       "image": "iot/sensor",
       "dns": {
