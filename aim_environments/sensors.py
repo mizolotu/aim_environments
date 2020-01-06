@@ -1605,10 +1605,13 @@ class SensorsEnv:
                     potential_target_ips.append(ip)
         if self.log_packets:
             n_targets = 1
-        else:
+        elif len(potential_target_ips) > 0:
             n_targets = random.randint(1, len(potential_target_ips))
-        shuffle(potential_target_ips)
-        target_ips = potential_target_ips[:n_targets]
+            shuffle(potential_target_ips)
+            target_ips = potential_target_ips[:n_targets]
+        else:
+            n_targets = 0
+            target_ips = []
         local_path = '/home/env/Defender/iot/malware/beerai/bee.py'
         remote_path = '/tmp/bee.py'
         potential_bee_containers = self.containers['app']['device']
